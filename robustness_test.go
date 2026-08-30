@@ -190,3 +190,78 @@ func TestTruncatedFlagOnlyOnTheLastRecord(t *testing.T) {
 	assert.Zero(t, flags[1])
 	assert.NotZero(t, flags[2])
 }
+
+func TestBoundaryEmptyFile(t *testing.T) {
+	// E16: Next returns false immediately, Err is nil.
+	for _, f := range []Format{FormatAuto, FormatCSV, FormatJSON, FormatStderr} {
+		p := New(bytes.NewReader(fixture(t, "empty.log")), Config{Format: f})
+		assert.False(t, p.Next(), "format %s", f)
+		assert.NoError(t, p.Err(), "format %s", f)
+		assert.Zero(t, p.Stats().Records)
+		assert.Zero(t, p.Stats().Malformed)
+	}
+}
+
+func TestBoundaryBOMOnlyFile(t *testing.T) {
+	// E17: the byte order mark is consumed, Next returns false, Err is nil.
+	//
+	// A BOM appears when a log has been through a Windows editor or a
+	// helpful text pipeline. Without special handling it becomes three
+	// bytes prepended to the first record, which breaks the timestamp scan
+	// and therefore format detection -- so one invisible byte at the front
+	// of a file would make the whole log unparseable.
+	for _, f := range []Format{FormatAuto, FormatCSV, FormatJSON, FormatStderr} {
+		p := New(bytes.NewReader(fixture(t, "bom-only.log")), Config{Format: f})
+		assert.False(t, p.Next(), "format %s", f)
+		assert.NoError(t, p.Err(), "format %s", f)
+	}
+}
+
+func TestBoundaryBOMBeforeRealContent(t *testing.T) {
+	// The case that actually matters: a BOM followed by a real log.
+	in := append([]byte{0xEF, 0xBB, 0xBF}, fixture(t, "json/basic.json")...)
+	p := New(bytes.NewReader(in), Config{})
+	require.True(t, p.Next(), "a BOM must not hide the first record")
+	assert.Equal(t, FormatJSON, p.DetectedFormat(), "a BOM must not defeat detection")
+	assert.Equal(t, SeverityLog, p.Record().Severity)
+	assert.Zero(t, p.Stats().Malformed)
+}
+
+func TestBoundaryInvalidUTF8(t *testing.T) {
+	// COR-005 and E11: bytes pass through unchanged, neither replaced nor
+	// rejected, in every format.
+	for _, c := range []struct {
+		file   string
+		format Format
+		prefix string
+	}{
+		{"csv/invalid-utf8.csv", FormatCSV, ""},
+		{"stderr/invalid-utf8.log", FormatStderr, "%m [%p] "},
+	} {
+		t.Run(c.file, func(t *testing.T) {
+			p := New(bytes.NewReader(fixture(t, c.file)),
+				Config{Format: c.format, LinePrefix: c.prefix})
+			require.True(t, p.Next())
+			msg := p.Record().Message
+			assert.Contains(t, string(msg), "\xff\xfe")
+			assert.Contains(t, string(msg), "\x80\x81")
+			assert.NotContains(t, string(msg), "�",
+				"invalid bytes must not be replaced")
+			assert.Zero(t, p.Stats().Malformed)
+		})
+	}
+}
+
+func TestBoundaryVeryLongLineOfNulls(t *testing.T) {
+	// A file region of NUL bytes is what a crashed filesystem leaves behind
+	// in a log. It must be survivable rather than a panic or a hang.
+	in := strings.Repeat("\x00", 4096) + "\n" +
+		`{"error_severity":"LOG","message":"after the damage"}` + "\n"
+	p := New(strings.NewReader(in), Config{Format: FormatJSON})
+	var msgs []string
+	for p.Next() {
+		msgs = append(msgs, string(p.Record().Message))
+	}
+	require.NoError(t, p.Err())
+	assert.Equal(t, []string{"after the damage"}, msgs)
+}
