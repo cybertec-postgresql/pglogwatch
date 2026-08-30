@@ -227,6 +227,13 @@ func (p *Parser) parseCSVInto(rec []byte) error {
 		copy(r.SQLState[:], sql)
 	}
 
+	if p.cfg.parseDuration() {
+		if d, ok := scanDuration(r.Message); ok {
+			r.Duration = d
+			r.Flags |= FlagHasDuration
+		}
+	}
+
 	if csvHasBackendType(n) {
 		r.BackendType = f[csvBackendType]
 	}
