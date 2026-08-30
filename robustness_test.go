@@ -107,3 +107,86 @@ func TestMalformedDoesNotStopALongStream(t *testing.T) {
 	assert.Equal(t, 500, n)
 	assert.Equal(t, int64(500), p.Stats().Malformed)
 }
+
+func TestTruncatedTailAcrossFormats(t *testing.T) {
+	// FMT-009 and AC-008 in all three formats. A file whose last line has no
+	// newline is what reading a live log always looks like, so this is the
+	// common case rather than a corner one.
+	cases := []struct {
+		name   string
+		format Format
+		prefix string
+		in     string
+		want   int
+	}{{
+		name:   "csvlog",
+		format: FormatCSV,
+		in: `2026-08-30 10:11:12.123 CEST,"u","d",1,"h",s,1,"t",2026-08-30 10:10:00 CEST,1/1,0,LOG,00000,"first",,,,,,,,,"a","b",,0` + "\n" +
+			`2026-08-30 10:11:13.123 CEST,"u","d",1,"h",s,2,"t",2026-08-30 10:10:00 CEST,1/1,0,LOG,00000,"second",,,,,,,,,"a","b",,0`,
+		want: 2,
+	}, {
+		name:   "jsonlog",
+		format: FormatJSON,
+		in: `{"error_severity":"LOG","message":"first"}` + "\n" +
+			`{"error_severity":"LOG","message":"second"}`,
+		want: 2,
+	}, {
+		name:   "stderr",
+		format: FormatStderr,
+		prefix: "%m [%p] ",
+		in: "2026-08-30 10:11:12.123 CEST [1] LOG:  first\n" +
+			"2026-08-30 10:11:13.123 CEST [1] LOG:  second",
+		want: 2,
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name+"/emitted with FlagTruncated", func(t *testing.T) {
+			p := New(strings.NewReader(c.in), Config{Format: c.format, LinePrefix: c.prefix})
+			var last *Record
+			n := 0
+			for p.Next() {
+				last = p.Record()
+				n++
+			}
+			require.NoError(t, p.Err())
+			require.Equal(t, c.want, n)
+			require.NotNil(t, last)
+			assert.Equal(t, "second", string(last.Message))
+			assert.NotZero(t, last.Flags&FlagTruncated,
+				"AC-008: an unterminated final record must be flagged")
+		})
+
+		t.Run(c.name+"/discarded on request", func(t *testing.T) {
+			p := New(strings.NewReader(c.in), Config{
+				Format:          c.format,
+				LinePrefix:      c.prefix,
+				NoTruncatedTail: true,
+			})
+			n := 0
+			for p.Next() {
+				assert.Zero(t, p.Record().Flags&FlagTruncated)
+				n++
+			}
+			require.NoError(t, p.Err())
+			assert.Equal(t, c.want-1, n)
+		})
+	}
+}
+
+func TestTruncatedFlagOnlyOnTheLastRecord(t *testing.T) {
+	// The flag must mark the record that was cut short, not every record in
+	// a file that happens to end without a newline.
+	in := `{"error_severity":"LOG","message":"a"}` + "\n" +
+		`{"error_severity":"LOG","message":"b"}` + "\n" +
+		`{"error_severity":"LOG","message":"c"}`
+	p := New(strings.NewReader(in), Config{Format: FormatJSON})
+	var flags []Flags
+	for p.Next() {
+		flags = append(flags, p.Record().Flags&FlagTruncated)
+	}
+	require.NoError(t, p.Err())
+	require.Len(t, flags, 3)
+	assert.Zero(t, flags[0])
+	assert.Zero(t, flags[1])
+	assert.NotZero(t, flags[2])
+}
