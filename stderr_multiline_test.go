@@ -103,3 +103,44 @@ func TestStderrContinuationAtEndOfStream(t *testing.T) {
 	assert.False(t, p.Next())
 	require.NoError(t, p.Err())
 }
+
+// TestStderrWrappedStatement covers E7: a continuation line that begins with
+// whitespace rather than with a prefix.
+//
+// PostgreSQL writes a multi-line statement by emitting the prefix once and
+// then indenting the remaining lines with a tab. Those lines match no prefix
+// and carry no label, so a parser that only recognises DETAIL/HINT/... style
+// continuations turns each into a malformed line -- and a long formatted query
+// can be dozens of them.
+func TestStderrWrappedStatement(t *testing.T) {
+	recs, p := parseFixture(t, "stderr/multiline.log",
+		Config{Format: FormatStderr, LinePrefix: multilinePrefix})
+	require.Len(t, recs, 2)
+	assert.Zero(t, p.Stats().Malformed, "indented statement lines are not malformed")
+
+	stmt := string(recs[0].Statement)
+	assert.Contains(t, stmt, "INSERT INTO orders (id, total)")
+	assert.Contains(t, stmt, "VALUES (42, 19.99)")
+	assert.Contains(t, stmt, "RETURNING id;")
+	assert.Equal(t, 2, strings.Count(stmt, "\n"),
+		"all three lines of the statement must be in one field")
+}
+
+func TestStderrWrappedMessage(t *testing.T) {
+	// The same wrapping, but on the message itself rather than on a
+	// labelled continuation.
+	in := "2026-08-30 10:11:15.000 CEST [31337] app_user@appdb LOG:  a message that\n" +
+		"\tcontinues on the next line\n" +
+		"2026-08-30 10:11:16.000 CEST [31337] app_user@appdb LOG:  done\n"
+	p := New(strings.NewReader(in), Config{Format: FormatStderr, LinePrefix: multilinePrefix})
+
+	require.True(t, p.Next())
+	r := p.Record()
+	assert.Equal(t, "a message that\n\tcontinues on the next line", string(r.Message))
+	assert.NotZero(t, r.Flags&FlagMultiline)
+
+	require.True(t, p.Next())
+	assert.Equal(t, "done", string(p.Record().Message))
+	require.NoError(t, p.Err())
+	assert.Zero(t, p.Stats().Malformed)
+}
