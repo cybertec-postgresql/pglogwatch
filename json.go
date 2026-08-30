@@ -270,3 +270,144 @@ func jsonKeyOf(key []byte) jsonKey {
 	}
 	return jkUnknown
 }
+
+// parseJSONInto fills a Record from one jsonlog object.
+//
+// Two Record fields have no single key behind them and must be assembled:
+// ConnectionFrom joins remote_host and remote_port, and Location joins
+// func_name, file_name and file_line_num. Both are built in the parser's
+// reusable scratch buffer AFTER the scan, because JSON keys may arrive in any
+// order and neither pair is guaranteed adjacent.
+//
+// The scratch grows a bounded number of times and is then reused, so these two
+// fields stay inside PERF-001 while still satisfying COR-001 -- the alternative,
+// dropping them, would lose information the log contains.
+func (p *Parser) parseJSONInto(rec []byte) error {
+	r := &p.rec
+	p.scratch = p.scratch[:0]
+
+	// Pieces held back until the scan finishes.
+	var host, port, fn, file, fileLine []byte
+
+	err := scanJSONObject(rec, func(key []byte, val jsonValue) {
+		if val.escaped {
+			r.Flags |= FlagNeedsUnquote
+		}
+		switch jsonKeyOf(key) {
+		case jkTimestamp:
+			if ts, _, ok := p.tz.timestamp(val.raw); ok {
+				r.Time = ts
+			}
+		case jkSessionStart:
+			if ts, _, ok := p.tz.timestamp(val.raw); ok {
+				r.SessionStart = ts
+			}
+		case jkUser:
+			r.User = val.raw
+		case jkDBName:
+			r.Database = val.raw
+		case jkPID:
+			r.ProcessID, _ = parseInt32(val.raw)
+		case jkRemoteHost:
+			host = val.raw
+		case jkRemotePort:
+			port = val.raw
+		case jkSessionID:
+			r.SessionID = val.raw
+		case jkLineNum:
+			r.SessionLineNum, _ = parseInt(val.raw)
+		case jkPS:
+			// "ps" is the process title, which is where PostgreSQL
+			// puts the command tag; csvlog's column is command_tag.
+			r.CommandTag = val.raw
+		case jkVXID:
+			r.VirtualXID = val.raw
+		case jkTXID:
+			r.TransactionID, _ = parseInt(val.raw)
+		case jkErrorSeverity:
+			r.RawSeverity = val.raw
+			r.Severity = p.sev.resolve(val.raw)
+		case jkStateCode:
+			if len(val.raw) == 5 {
+				copy(r.SQLState[:], val.raw)
+			}
+		case jkMessage:
+			r.Message = val.raw
+		case jkDetail:
+			r.Detail = val.raw
+		case jkHint:
+			r.Hint = val.raw
+		case jkInternalQuery:
+			r.InternalQuery = val.raw
+		case jkInternalPosition:
+			r.InternalQueryPos, _ = parseInt32(val.raw)
+		case jkContext:
+			r.Context = val.raw
+		case jkStatement:
+			// csvlog carries the statement in its query column and
+			// this package mirrors it into Query and Statement;
+			// jsonlog must do the same or the two disagree (COR-004).
+			r.Statement = val.raw
+			r.Query = val.raw
+			r.Flags |= FlagHasStatement
+		case jkCursorPosition:
+			r.QueryPos, _ = parseInt32(val.raw)
+		case jkFuncName:
+			fn = val.raw
+		case jkFileName:
+			file = val.raw
+		case jkFileLineNum:
+			fileLine = val.raw
+		case jkApplicationName:
+			r.ApplicationName = val.raw
+		case jkBackendType:
+			r.BackendType = val.raw
+		case jkLeaderPID:
+			r.LeaderPID, _ = parseInt32(val.raw)
+		case jkQueryID:
+			r.QueryID, _ = parseInt(val.raw)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	// Assemble the joined fields. Offsets are recorded and sliced only at
+	// the end, because appending may reallocate the scratch and invalidate
+	// a slice taken from it earlier.
+	fromStart := len(p.scratch)
+	if len(host) > 0 {
+		p.scratch = append(p.scratch, host...)
+		if len(port) > 0 {
+			p.scratch = append(p.scratch, ':')
+			p.scratch = append(p.scratch, port...)
+		}
+	}
+	fromEnd := len(p.scratch)
+
+	locStart := fromEnd
+	if len(fn) > 0 || len(file) > 0 {
+		// csvlog writes this column as "func, file:line"; matching that
+		// spelling is what lets COR-004 hold for Location.
+		p.scratch = append(p.scratch, fn...)
+		if len(fn) > 0 && len(file) > 0 {
+			p.scratch = append(p.scratch, ", "...)
+		}
+		p.scratch = append(p.scratch, file...)
+		if len(fileLine) > 0 {
+			p.scratch = append(p.scratch, ':')
+			p.scratch = append(p.scratch, fileLine...)
+		}
+	}
+	locEnd := len(p.scratch)
+
+	if fromEnd > fromStart {
+		r.ConnectionFrom = p.scratch[fromStart:fromEnd:fromEnd]
+	}
+	if locEnd > locStart {
+		r.Location = p.scratch[locStart:locEnd:locEnd]
+	}
+
+	p.scanRecordDuration()
+	return nil
+}

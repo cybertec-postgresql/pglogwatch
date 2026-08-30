@@ -49,7 +49,9 @@ func differentialEvents() []event {
 			`68b2c4a0.7a69,8,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,ERROR,42P01,` +
 			`"boom",,,,,,"SELECT * FROM nope;",,,"psql","client backend",,0`,
 		json: `{"timestamp":"2026-08-30 10:11:13.001 CEST","user":"app_user","dbname":"appdb",` +
-			`"pid":31337,"session_id":"68b2c4a0.7a69","line_num":8,"error_severity":"ERROR",` +
+			`"pid":31337,"session_id":"68b2c4a0.7a69","line_num":8,"ps":"SELECT",` +
+			`"session_start":"2026-08-30 10:10:00 CEST","vxid":"3/15","txid":0,` +
+			`"error_severity":"ERROR",` +
 			`"state_code":"42P01","message":"boom","statement":"SELECT * FROM nope;",` +
 			`"application_name":"psql","backend_type":"client backend"}`,
 		stderr: "2026-08-30 10:11:13.001 CEST [31337] app_user@appdb ERROR:  boom\n" +

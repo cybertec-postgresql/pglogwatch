@@ -66,7 +66,7 @@ func (p *Parser) parseInto(rec []byte) error {
 	case FormatCSV:
 		return p.parseCSVInto(rec)
 	case FormatJSON:
-		return p.parseUnstructured(rec) // replaced in T075
+		return p.parseJSONInto(rec)
 	default:
 		return p.parseStderrInto(rec)
 	}
