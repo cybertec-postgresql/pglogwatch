@@ -159,3 +159,114 @@ func scanJSONValue(b []byte, i int) (jsonValue, int, bool) {
 	}
 	return jsonValue{raw: b[start:i]}, i, true
 }
+
+// jsonKey identifies one of the keys PostgreSQL's jsonlog writer emits.
+type jsonKey uint8
+
+const (
+	jkUnknown jsonKey = iota
+	jkTimestamp
+	jkUser
+	jkDBName
+	jkPID
+	jkRemoteHost
+	jkRemotePort
+	jkSessionID
+	jkLineNum
+	jkPS
+	jkSessionStart
+	jkVXID
+	jkTXID
+	jkErrorSeverity
+	jkStateCode
+	jkMessage
+	jkDetail
+	jkHint
+	jkInternalQuery
+	jkInternalPosition
+	jkContext
+	jkStatement
+	jkCursorPosition
+	jkFuncName
+	jkFileName
+	jkFileLineNum
+	jkApplicationName
+	jkBackendType
+	jkLeaderPID
+	jkQueryID
+)
+
+// jsonKeyOf maps a key name to its identifier.
+//
+// PERF-005 forbids a map per record, and a map here would be one: 29 keys
+// hashed per record, on top of the scan that already found them. A switch on
+// string(key) compiles to a length dispatch followed by direct comparisons,
+// with no copy of key and no hashing, and the compiler generates a better
+// decision tree than a hand-written perfect hash would be worth maintaining.
+//
+// The key names are exactly those FMT-002 lists; an unrecognised key is
+// ignored rather than reported, so a future PostgreSQL that adds one parses as
+// a record missing that field rather than as a malformed line.
+func jsonKeyOf(key []byte) jsonKey {
+	switch string(key) {
+	case "timestamp":
+		return jkTimestamp
+	case "user":
+		return jkUser
+	case "dbname":
+		return jkDBName
+	case "pid":
+		return jkPID
+	case "remote_host":
+		return jkRemoteHost
+	case "remote_port":
+		return jkRemotePort
+	case "session_id":
+		return jkSessionID
+	case "line_num":
+		return jkLineNum
+	case "ps":
+		return jkPS
+	case "session_start":
+		return jkSessionStart
+	case "vxid":
+		return jkVXID
+	case "txid":
+		return jkTXID
+	case "error_severity":
+		return jkErrorSeverity
+	case "state_code":
+		return jkStateCode
+	case "message":
+		return jkMessage
+	case "detail":
+		return jkDetail
+	case "hint":
+		return jkHint
+	case "internal_query":
+		return jkInternalQuery
+	case "internal_position":
+		return jkInternalPosition
+	case "context":
+		return jkContext
+	case "statement":
+		return jkStatement
+	case "cursor_position":
+		return jkCursorPosition
+	case "func_name":
+		return jkFuncName
+	case "file_name":
+		return jkFileName
+	case "file_line_num":
+		return jkFileLineNum
+	case "application_name":
+		return jkApplicationName
+	case "backend_type":
+		return jkBackendType
+	case "leader_pid":
+		return jkLeaderPID
+	case "query_id":
+		return jkQueryID
+	}
+	return jkUnknown
+}
