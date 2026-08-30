@@ -8,7 +8,8 @@
 //
 // A tool that is not installed is reported as not measured rather than failing
 // the run, so the harness is usable in a checkout as well as on the pinned
-// benchmark runner.
+// benchmark runner. Pass -gate to exit 2 when a threshold is missed or could
+// not be measured, which is what a release job wants.
 package main
 
 import (
@@ -28,6 +29,7 @@ func main() {
 		warmup = flag.Int("warmup", 3, "unmeasured warm-up runs per cell")
 		out    = flag.String("out", "RESULTS.md", "results table path; - for standard output")
 		cli    = flag.String("cli", "../cmd/pglogwatch", "directory of the pglogwatch CLI module")
+		gate   = flag.Bool("gate", false, "exit 2 if any threshold is missed or unmeasured")
 	)
 	flag.Parse()
 
@@ -73,5 +75,15 @@ func main() {
 	}
 	if *out != "-" {
 		fmt.Fprintf(os.Stderr, "results written to %s\n", *out)
+	}
+
+	// Evaluate the thresholds as a value with an exit code behind it, rather
+	// than as a string in a Markdown file for a CI job to grep for.
+	findings := compare.Verify(results)
+	fmt.Fprint(os.Stderr, "\nThresholds (PERF-024, PERF-025):\n")
+	fmt.Fprint(os.Stderr, compare.Summarise(findings))
+
+	if *gate && len(compare.Blocking(findings)) > 0 {
+		os.Exit(2)
 	}
 }

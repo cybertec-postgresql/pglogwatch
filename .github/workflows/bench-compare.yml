@@ -77,11 +77,14 @@ jobs:
       # threshold has to stop the release rather than appear in a report
       # nobody re-reads. VAL-010 allows a threshold to be missed; it does not
       # allow it to be missed quietly.
-      - name: Fail a release tag on an unmet threshold
+      #
+      # The check is the harness's own verifier, exiting 2, rather than a grep
+      # for a string in the Markdown -- which would stop working the day
+      # someone rewords the table, and would fail open.
+      #
+      # An UNMEASURED threshold blocks too. VAL-004 does not allow one to be
+      # assumed met, and "the baseline was not installed" is not "we were
+      # faster".
+      - name: Fail a release tag on an unmet or unmeasured threshold
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          if grep -q 'NOT MET' bench/RESULTS.md; then
-            echo "::error::a PERF-024 or PERF-025 threshold was not met; VAL-010 requires the release notes to state the measured value, the cause and the remediation plan"
-            grep -n 'NOT MET' bench/RESULTS.md
-            exit 1
-          fi
+        run: make bench-compare GATE=-gate

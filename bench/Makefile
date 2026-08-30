@@ -19,8 +19,12 @@ corpus:
 RUNS   ?= 10
 WARMUP ?= 3
 
+## GATE=-gate makes an unmet or unmeasured threshold exit 2, which is what a
+## release job wants and a developer running this locally does not.
+GATE   ?=
+
 compare:
-	$(GO) run ./cmd/compare -corpus $(CORPUS) -runs $(RUNS) -warmup $(WARMUP) -out RESULTS.md
+	$(GO) run ./cmd/compare -corpus $(CORPUS) -runs $(RUNS) -warmup $(WARMUP) -out RESULTS.md $(GATE)
 
 clean:
 	rm -rf $(CORPUS)
