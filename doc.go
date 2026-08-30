@@ -51,6 +51,18 @@
 // # Concurrency
 //
 // A [Parser] is not safe for concurrent use by multiple goroutines, and
-// neither is the [Record] it hands out. Give each goroutine its own parser, or
-// use [ParallelScan], which does exactly that.
+// neither is the [Record] it hands out. That is not an oversight: a parser
+// hands out slices of one reusable buffer, which is what makes it
+// allocation-free, and sharing that buffer between goroutines would mean
+// copying -- giving up the property the package exists for.
+//
+// Give each goroutine its own parser, or use [ParallelScan], which does
+// exactly that: one [Parser] per worker, over a different part of the input.
+//
+// [ParallelScan] does NOT preserve order. Records arrive as workers reach
+// them, and the order differs between runs on the same input. A caller that
+// needs order should use a [Parser] directly, or sort what it collects.
+// Its callback is shared by every worker, so it must be safe to call
+// concurrently; the [Record] passed to it belongs to the calling worker and
+// is valid until the callback returns.
 package pglogwatch
