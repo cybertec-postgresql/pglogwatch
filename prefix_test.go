@@ -257,3 +257,61 @@ func TestPrefixPadding(t *testing.T) {
 		assert.Equal(t, 123000000, r.Time.Nanosecond())
 	})
 }
+
+// TestPrefixConditionalQ covers E5 and FMT-003's %q: everything after %q is
+// omitted for processes that have no session -- the checkpointer, the
+// autovacuum launcher, the startup process, the WAL writer.
+//
+// This is not a corner case. Any server with %q in its prefix, which includes
+// several distributions' defaults, writes both shapes into the same file all
+// day. A parser that requires the post-%q segments rejects every background
+// process line; one that ignores %q entirely mis-assigns the severity to a
+// user name.
+func TestPrefixConditionalQ(t *testing.T) {
+	const prefix = "%m [%p] %q%u@%d "
+
+	t.Run("a session backend writes the optional part", func(t *testing.T) {
+		r := parseStderrLine(t, prefix,
+			"2026-08-30 10:11:12.123 CEST [31337] app_user@appdb LOG:  hello")
+		assert.Equal(t, "app_user", string(r.User))
+		assert.Equal(t, "appdb", string(r.Database))
+		assert.Equal(t, "hello", string(r.Message))
+	})
+
+	t.Run("a background worker omits it", func(t *testing.T) {
+		r := parseStderrLine(t, prefix,
+			"2026-08-30 10:11:14.500 CEST [31338] LOG:  checkpoint starting: time")
+		assert.Equal(t, int32(31338), r.ProcessID, "the part before %q must still parse")
+		assert.Empty(t, r.User, "an absent field must be absent, not guessed")
+		assert.Empty(t, r.Database)
+		assert.Equal(t, SeverityLog, r.Severity)
+		assert.Equal(t, "checkpoint starting: time", string(r.Message),
+			"the message must not absorb the missing prefix segments")
+	})
+
+	t.Run("both shapes in one stream", func(t *testing.T) {
+		in := "2026-08-30 10:11:12.123 CEST [31337] app_user@appdb ERROR:  boom\n" +
+			"2026-08-30 10:11:14.500 CEST [31338] LOG:  checkpoint starting: time\n" +
+			"2026-08-30 10:11:15.000 CEST [31337] app_user@appdb LOG:  done\n"
+		p := New(strings.NewReader(in), Config{Format: FormatStderr, LinePrefix: prefix})
+		var got []string
+		for p.Next() {
+			got = append(got, p.Record().Severity.String()+":"+string(p.Record().Message))
+		}
+		require.NoError(t, p.Err())
+		assert.Equal(t, []string{
+			"ERROR:boom",
+			"LOG:checkpoint starting: time",
+			"LOG:done",
+		}, got)
+		assert.Zero(t, p.Stats().Malformed, "neither shape may be counted as malformed")
+	})
+
+	t.Run("%q at the very end of the prefix", func(t *testing.T) {
+		// Legal, if pointless: nothing is conditional because nothing
+		// follows. It must not be mistaken for an unknown escape.
+		r := parseStderrLine(t, "[%p] %q", "[31337] LOG:  hello")
+		assert.Equal(t, int32(31337), r.ProcessID)
+		assert.Equal(t, "hello", string(r.Message))
+	})
+}
