@@ -330,3 +330,81 @@ func TestRecordPointerIsStable(t *testing.T) {
 	}
 	assert.Same(t, first, p.Record(), "even after EOF")
 }
+
+func TestResetReusesTheBuffer(t *testing.T) {
+	// PERF-011: Reset must not reallocate. This is what makes walking a
+	// directory of log files cost one buffer rather than one per file --
+	// with the default 64 KiB buffer and a daily-rotated log directory,
+	// the difference is megabytes of garbage per collection cycle.
+	in := bytes.Repeat(fixture(t, "json/basic.json"), 40)
+	p := New(bytes.NewReader(in), Config{Format: FormatJSON})
+	for p.Next() { //nolint:revive // drain
+	}
+	require.NoError(t, p.Err())
+	before := &p.buf.data[0]
+	capBefore := cap(p.buf.data)
+
+	for range 20 {
+		p.Reset(bytes.NewReader(in))
+		for p.Next() { //nolint:revive // drain
+		}
+		require.NoError(t, p.Err())
+	}
+	assert.Same(t, before, &p.buf.data[0], "Reset reallocated the read buffer")
+	assert.Equal(t, capBefore, cap(p.buf.data))
+}
+
+func TestResetClearsStateButKeepsConfiguration(t *testing.T) {
+	// Reset is "same parser, new stream". Counters and detection belong to
+	// the stream; configuration and caches belong to the parser.
+	first := bytes.Repeat(fixture(t, "json/basic.json"), 3)
+	p := New(bytes.NewReader(first), Config{Format: FormatJSON, MessagesLang: "ru"})
+	for p.Next() { //nolint:revive // drain
+	}
+	require.Equal(t, int64(9), p.Stats().Records)
+
+	p.Reset(bytes.NewReader(fixture(t, "json/basic.json")))
+	assert.Zero(t, p.Stats().Records, "counters belong to the stream")
+	assert.Zero(t, p.Stats().Bytes)
+	assert.NoError(t, p.Err())
+
+	for p.Next() { //nolint:revive // drain
+	}
+	assert.Equal(t, int64(3), p.Stats().Records)
+	assert.Equal(t, "ru", p.cfg.MessagesLang, "configuration belongs to the parser")
+}
+
+func TestResetAfterFatalErrorRecovers(t *testing.T) {
+	// A parser whose stream failed must be reusable, or a directory tailer
+	// would have to build a new one after every unreadable file -- and
+	// would then lose the buffer PERF-011 exists to preserve.
+	p := New(&errReader{data: `{"error_severity":"LOG","message":"ok"}` + "\n"},
+		Config{Format: FormatJSON})
+	for p.Next() { //nolint:revive // drain
+	}
+	require.Error(t, p.Err())
+
+	p.Reset(bytes.NewReader(fixture(t, "json/basic.json")))
+	assert.NoError(t, p.Err(), "Reset must clear the previous stream's error")
+	n := 0
+	for p.Next() {
+		n++
+	}
+	assert.NoError(t, p.Err())
+	assert.Equal(t, 3, n)
+}
+
+func TestResetMidStream(t *testing.T) {
+	// Reset before the previous stream is exhausted must not carry over
+	// buffered bytes from it, which would prepend the tail of one file to
+	// the head of the next.
+	p := New(bytes.NewReader(bytes.Repeat(fixture(t, "json/basic.json"), 10)),
+		Config{Format: FormatJSON})
+	require.True(t, p.Next())
+
+	p.Reset(strings.NewReader(`{"error_severity":"ERROR","message":"fresh"}` + "\n"))
+	require.True(t, p.Next())
+	assert.Equal(t, "fresh", string(p.Record().Message))
+	assert.Zero(t, p.Record().Offset, "offsets restart with the new stream")
+	assert.False(t, p.Next())
+}
