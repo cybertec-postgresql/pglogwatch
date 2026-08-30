@@ -81,3 +81,75 @@ func splitCSVRecord(data []byte, atEOF bool, emitTail bool) (int, []byte, error)
 	}
 	return len(data), line, nil
 }
+
+// maxCSVColumns bounds the per-record column array. PostgreSQL 18 writes 26;
+// the extra room means a future version that appends a column parses as a
+// record with unknown trailing fields rather than as a malformed line.
+const maxCSVColumns = 32
+
+// splitCSVFields fills out with borrowed slices, one per column, and returns
+// how many columns the record had.
+//
+// Quoted fields are returned WITHOUT their surrounding quotes but WITH any
+// doubled quotes left as written: PERF-009 defers unescaping to the caller, so
+// the parser signals it with FlagNeedsUnquote and never rewrites the bytes.
+// That is what keeps a record costing zero allocations for a caller who only
+// wants the severity.
+func splitCSVFields(rec []byte, out *[maxCSVColumns][]byte) (int, Flags, error) {
+	var flags Flags
+	n := 0
+	i := 0
+	for {
+		var val []byte
+		if i < len(rec) && rec[i] == '"' {
+			i++
+			start := i
+			for {
+				q := bytes.IndexByte(rec[i:], '"')
+				if q < 0 {
+					// The framer only hands over records
+					// whose quotes balance, so an
+					// unterminated field here means the
+					// record was truncated by the size cap
+					// or by end of input.
+					return 0, 0, errUnterminated
+				}
+				j := i + q
+				if j+1 < len(rec) && rec[j+1] == '"' {
+					flags |= FlagNeedsUnquote
+					i = j + 2
+					continue
+				}
+				val = rec[start:j]
+				i = j + 1
+				break
+			}
+			// Skip anything between the closing quote and the
+			// field separator. PostgreSQL never writes such bytes;
+			// tolerating them keeps one corrupt field from
+			// cascading into a wrong column count for the rest of
+			// the record.
+			if c := bytes.IndexByte(rec[i:], ','); c >= 0 {
+				i += c
+			} else {
+				i = len(rec)
+			}
+		} else if c := bytes.IndexByte(rec[i:], ','); c >= 0 {
+			val = rec[i : i+c]
+			i += c
+		} else {
+			val = rec[i:]
+			i = len(rec)
+		}
+
+		if n < len(out) {
+			out[n] = val
+		}
+		n++
+
+		if i >= len(rec) {
+			return n, flags, nil
+		}
+		i++ // the separator; a trailing one yields a final empty column
+	}
+}
