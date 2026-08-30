@@ -131,4 +131,24 @@ func (c *counter) bySlowest(n int) []*counted {
 	return out
 }
 
+// byTotal returns the n groups with the largest accumulated value, which is
+// what finds the query that is individually unremarkable and collectively
+// ruinous.
+func (c *counter) byTotal(n int) []*counted {
+	out := make([]*counted, 0, len(c.groups))
+	for _, g := range c.groups {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].total != out[j].total {
+			return out[i].total > out[j].total
+		}
+		return out[i].key < out[j].key
+	})
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
