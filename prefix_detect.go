@@ -57,6 +57,27 @@ var candidatePrefixes = []string{
 	"%t ",
 }
 
+// compiledCandidates is candidatePrefixes compiled once.
+//
+// Detection runs again after every Reset, because a new file may have been
+// written by a differently configured server. Compiling eighteen templates per
+// file put ~79 allocations into the PERF-001 gate for a parser walking a log
+// directory -- caught by TestAllocStderrDetectedPrefix, which exists for
+// exactly this. The templates are immutable once built, so sharing them is
+// safe and costs nothing at run time (CON-002 forbids mutable global state,
+// not constant tables).
+var compiledCandidates = func() []*prefixTemplate {
+	out := make([]*prefixTemplate, 0, len(candidatePrefixes))
+	for _, src := range candidatePrefixes {
+		if tpl, err := compilePrefix(src); err == nil {
+			out = append(out, tpl)
+		}
+		// A typo in the table above must not break detection at run
+		// time; the table is covered by its own test instead.
+	}
+	return out
+}()
+
 // detectPrefix picks a log_line_prefix for the buffered input, or nil when
 // none fits.
 func (p *Parser) detectPrefix() *prefixTemplate {
@@ -75,13 +96,9 @@ func (p *Parser) detectPrefix() *prefixTemplate {
 
 	var best *prefixTemplate
 	bestScore, bestExplained, bestSegs := 0, 0, 0
-	for _, src := range candidatePrefixes {
-		if stamp != 0 && usesOtherTimestampEscape(src, stamp) {
+	for _, tpl := range compiledCandidates {
+		if stamp != 0 && usesOtherTimestampEscape(tpl.src, stamp) {
 			continue
-		}
-		tpl, err := compilePrefix(src)
-		if err != nil {
-			continue // a typo in the table must not break detection
 		}
 		score, explained := p.scorePrefix(tpl, sample)
 		if score == 0 {

@@ -116,3 +116,18 @@ func TestPrefixDetectionFallsBackGracefully(t *testing.T) {
 	require.NoError(t, p.Err())
 	assert.Equal(t, 2, n, "unrecognised lines must still be emitted as records")
 }
+
+// TestCandidatePrefixesCompile guards the detection table itself.
+//
+// compiledCandidates skips a candidate that fails to compile, so a typo would
+// not break detection at run time -- it would quietly remove a prefix from the
+// list and make one class of log undetectable. That is precisely the kind of
+// failure a table needs a test for.
+func TestCandidatePrefixesCompile(t *testing.T) {
+	require.Len(t, compiledCandidates, len(candidatePrefixes),
+		"a candidate prefix failed to compile and was silently dropped")
+	for i, tpl := range compiledCandidates {
+		assert.Equal(t, candidatePrefixes[i], tpl.String())
+		assert.NotEmpty(t, tpl.segs, "candidate %q compiled to nothing", tpl.String())
+	}
+}
