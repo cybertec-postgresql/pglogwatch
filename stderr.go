@@ -39,14 +39,14 @@ func (t *prefixTemplate) scanSegments(line []byte, pos, from, to int, r *Record,
 		case s.esc == 'q':
 			// A marker, not a value. Handled by the caller.
 		default:
-			val, n, ok := t.scanValue(line, pos, i, to)
+			val, consumed, ok := t.scanValue(line, pos, i, to)
 			if !ok {
 				return 0, false
 			}
 			if r != nil {
 				assignEscape(r, s.esc, val, tz)
 			}
-			pos += n
+			pos += consumed
 		}
 	}
 	return pos, true
@@ -57,6 +57,17 @@ func (t *prefixTemplate) scanSegments(line []byte, pos, from, to int, r *Record,
 func (t *prefixTemplate) scanValue(line []byte, pos, i, to int) ([]byte, int, bool) {
 	s := &t.segs[i]
 	b := line[pos:]
+
+	// Right-aligned padding (%5p) puts the fill BEFORE the value, so it has
+	// to be stepped over before the value's own shape can be recognised --
+	// a digit scanner starting on a space finds nothing.
+	lead := 0
+	if s.width > 0 {
+		for lead < len(b) && b[lead] == ' ' {
+			lead++
+		}
+		b = b[lead:]
+	}
 
 	var n int
 	var ok bool
@@ -79,7 +90,29 @@ func (t *prefixTemplate) scanValue(line []byte, pos, i, to int) ([]byte, int, bo
 	if !ok {
 		return nil, 0, false
 	}
-	return b[:n], n, true
+	val := b[:n]
+	consumed := lead + n
+
+	if s.width != 0 {
+		// Padding is whitespace the server inserted, not part of the
+		// value. A free-form value delimited by the next literal has
+		// already swallowed its own fill, so trim rather than assume.
+		val = trimSpace(val)
+	}
+	if s.width < 0 {
+		// Left-aligned padding (%-5p) puts the fill AFTER the value.
+		// Consume up to the declared width so the next literal segment
+		// lines up -- but only up to it: PostgreSQL treats the width as
+		// a minimum, so a longer value is written in full and there is
+		// no fill to skip.
+		for pad := -s.width - n; pad > 0; pad-- {
+			if pos+consumed >= len(line) || line[pos+consumed] != ' ' {
+				break
+			}
+			consumed++
+		}
+	}
+	return val, consumed, true
 }
 
 // scanTextLen bounds a free-form value, which has no shape of its own: it runs
