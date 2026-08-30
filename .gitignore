@@ -20,3 +20,8 @@ coverage.out
 # Crashers the fuzzer writes. Real regression seeds are committed
 # deliberately, after being reviewed.
 /testdata/fuzz/
+
+# The comparative results table. TST-009 publishes it as a build artifact; a
+# copy committed per run would accumulate numbers nobody re-reads, and a stale
+# one is worse than none.
+/bench/RESULTS.md

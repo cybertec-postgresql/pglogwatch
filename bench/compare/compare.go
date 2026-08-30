@@ -13,6 +13,7 @@ package compare
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -178,6 +179,13 @@ func versionOf(name, path string) string {
 	return strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 }
 
+// slowThreshold is passed to both tools in W4.
+//
+// pgweasel's "slow" takes the threshold as a required positional argument and
+// exits 2 without one; pglogwatch defaults it. Letting each pick its own would
+// compare two different questions, so both are asked the same one.
+const slowThreshold = "500ms"
+
 // Workloads builds the §6.4 table for a corpus directory.
 //
 // The csvlog file is used for every workload, because it is the format all
@@ -191,7 +199,7 @@ func Workloads(corpusDir string) []Workload {
 		ID:   "W1",
 		Name: "parse and discard",
 		Args: map[string][]string{
-			"pglogwatch": {"bench", csvlog},
+			"pglogwatch": {"bench", "--jobs", "1", csvlog},
 			// pgbadger has no parse-only mode; -o /dev/null is the
 			// closest, and it still builds the full in-memory report
 			// before discarding it. Recorded, not hidden.
@@ -207,7 +215,7 @@ func Workloads(corpusDir string) []Workload {
 		ID:   "W2",
 		Name: "severity histogram",
 		Args: map[string][]string{
-			"pglogwatch": {"stats", csvlog},
+			"pglogwatch": {"stats", "--jobs", "1", csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel":   {"stats", csvlog},
 		},
@@ -220,7 +228,7 @@ func Workloads(corpusDir string) []Workload {
 		ID:   "W3",
 		Name: "errors report",
 		Args: map[string][]string{
-			"pglogwatch": {"errors", csvlog},
+			"pglogwatch": {"errors", "--jobs", "1", csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel":   {"errors", csvlog},
 		},
@@ -233,9 +241,9 @@ func Workloads(corpusDir string) []Workload {
 		ID:   "W4",
 		Name: "top slow queries",
 		Args: map[string][]string{
-			"pglogwatch": {"slow", csvlog},
+			"pglogwatch": {"slow", "--jobs", "1", "--min-duration", slowThreshold, csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
-			"pgweasel":   {"slow", csvlog},
+			"pgweasel":   {"slow", slowThreshold, csvlog},
 		},
 		Produces: map[string]string{
 			"pglogwatch": "slowest and most-total-time statements",
@@ -315,15 +323,20 @@ func measure(ctx context.Context, cfg Config, tool Tool, w Workload, args []stri
 	}
 	times := make([]float64, 0, cfg.Runs)
 	for range cfg.Runs {
-		d, rss, err := runOnceMeasured(ctx, cfg, tool, args)
+		got, err := runOnceMeasured(ctx, cfg, tool, args)
 		if err != nil {
 			r.Skipped = "failed: " + err.Error()
 			return r
 		}
-		times = append(times, d.Seconds())
-		if rss > r.PeakRSSKB {
-			r.PeakRSSKB = rss
+		if why := notMeasured(got, w, tool.Name); why != "" {
+			r.Skipped = why
+			return r
 		}
+		times = append(times, got.elapsed.Seconds())
+		if got.rssKB > r.PeakRSSKB {
+			r.PeakRSSKB = got.rssKB
+		}
+		r.OutputKB = got.outBytes / 1024
 	}
 	sort.Float64s(times)
 	r.MinSec = times[0]
@@ -335,33 +348,98 @@ func measure(ctx context.Context, cfg Config, tool Tool, w Workload, args []stri
 }
 
 func runOnce(ctx context.Context, cfg Config, tool Tool, args []string) error {
-	_, _, err := runOnceMeasured(ctx, cfg, tool, args)
+	_, err := runOnceMeasured(ctx, cfg, tool, args)
 	return err
 }
 
-func runOnceMeasured(ctx context.Context, cfg Config, tool Tool, args []string) (time.Duration, int64, error) {
+func runOnceMeasured(ctx context.Context, cfg Config, tool Tool, args []string) (run, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, tool.Binary, args...) //nolint:gosec // binaries and args are from the table above
 	out, err := os.CreateTemp(cfg.OutputDir, "pglogwatch-bench-*")
 	if err != nil {
-		return 0, 0, err
+		return run{}, err
 	}
 	defer func() {
 		_ = out.Close()
 		_ = os.Remove(out.Name())
 	}()
 	cmd.Stdout = out
-	cmd.Stderr = nil
+	// Captured, not discarded. A tool can report failure on stderr and
+	// still exit 0 -- see notMeasured -- and stderr is the only place that
+	// shows up.
+	var errBuf strings.Builder
+	cmd.Stderr = &errBuf
 
 	start := time.Now()
 	err = cmd.Run()
 	elapsed := time.Since(start)
 	if err != nil {
-		return 0, 0, err
+		return run{}, err
 	}
-	return elapsed, peakRSSKB(cmd), nil
+	size, _ := out.Seek(0, io.SeekEnd)
+	return run{
+		elapsed:  elapsed,
+		rssKB:    peakRSSKB(cmd),
+		outBytes: size,
+		stderr:   strings.TrimSpace(errBuf.String()),
+	}, nil
+}
+
+// run is one timed execution.
+type run struct {
+	elapsed  time.Duration
+	rssKB    int64
+	outBytes int64
+	stderr   string
+}
+
+// notMeasured reports why a run does not count as having done the work, or ""
+// if it does.
+//
+// Exit status alone is not enough, and finding that out is what this function
+// is for. pgweasel's "stats" subcommand prints "ERROR ... Not implemented",
+// writes nothing, and exits 0 -- so the harness timed a program that declined
+// to run and recorded pglogwatch losing to it by 7x. A benchmark that reports
+// a tool as faster because it did not do the work is worse than no benchmark:
+// it is a wrong number with a plausible shape.
+//
+// Two independent signals, because either alone has a false positive:
+// emptiness is normal for a tool told to write to /dev/null, and an error on
+// stderr is not always fatal.
+func notMeasured(r run, w Workload, tool string) string {
+	lower := strings.ToLower(r.stderr)
+	for _, sig := range []string{"not implemented", "error:", "] error", "panic", "unrecognized", "unexpected argument"} {
+		if strings.Contains(lower, sig) {
+			return "reported an error: " + firstLine(r.stderr)
+		}
+	}
+	// A workload whose output goes to /dev/null is expected to write
+	// nothing to stdout, so emptiness only means failure elsewhere.
+	if r.outBytes == 0 && !writesToDevNull(w, tool) {
+		return "produced no output"
+	}
+	return ""
+}
+
+func writesToDevNull(w Workload, tool string) bool {
+	for _, a := range w.Args[tool] {
+		if a == os.DevNull {
+			return true
+		}
+	}
+	return false
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 120 {
+		s = s[:120] + "..."
+	}
+	return strings.TrimSpace(s)
 }
 
 // peakRSSKB reports the child's peak resident set, where the platform can.
