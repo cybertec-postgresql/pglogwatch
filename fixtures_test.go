@@ -54,6 +54,12 @@ func TestFixturesStayWithinBudget(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// testdata/fuzz is the fuzzer's own corpus of failing inputs,
+		// written by the go tool rather than committed as a fixture, so
+		// it is not part of DAT-002's budget.
+		if strings.Contains(filepath.ToSlash(path), "/fuzz/") {
+			return nil
+		}
 		info, err := d.Info()
 		if err != nil {
 			return err
