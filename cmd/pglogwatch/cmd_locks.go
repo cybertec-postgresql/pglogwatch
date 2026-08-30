@@ -42,11 +42,13 @@ func runLocks(o *options) error {
 		}
 		addIfPresent(byDatabase, r.Database)
 		if t := lockTarget(r.Message); len(t) > 0 {
-			byTarget.add(string(t), 0, "")
+			byTarget.addBytes(t, 0, nil)
 		}
 		msg := unquoted(r.Message, r, f, &buf)
 		normBuf = normalizeMessage(normBuf[:0], msg)
-		samples.add(string(normBuf), 0, oneLine(truncate(string(msg), 200)))
+		samples.addBytes(normBuf, 0, func() string {
+			return oneLine(truncate(string(msg), 200))
+		})
 		return nil
 	})
 	if err != nil {

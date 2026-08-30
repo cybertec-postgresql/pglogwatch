@@ -63,7 +63,7 @@ func runConnections(o *options) error {
 
 func addIfPresent(c *counter, v []byte) {
 	if len(v) > 0 {
-		c.add(string(v), 0, "")
+		c.addBytes(v, 0, nil)
 	}
 }
 

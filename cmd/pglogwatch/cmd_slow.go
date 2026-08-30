@@ -45,10 +45,9 @@ func runSlow(o *options) error {
 
 		text := statementText(r, f, &buf)
 		normBuf = normalizeMessage(normBuf[:0], text)
-		key := string(normBuf)
-		sample := oneLine(truncate(string(text), 200))
-		byStatement.add(key, ms, sample)
-		slowest.add(key, ms, sample)
+		sample := func() string { return oneLine(truncate(string(text), 200)) }
+		byStatement.addBytes(normBuf, ms, sample)
+		slowest.addBytes(normBuf, ms, sample)
 		return nil
 	})
 	if err != nil {

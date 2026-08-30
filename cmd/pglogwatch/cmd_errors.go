@@ -36,9 +36,11 @@ func runErrors(o *options) error {
 		}
 		msg := unquoted(r.Message, r, f, &buf)
 		normBuf = normalizeMessage(normBuf[:0], msg)
-		byMessage.add(string(normBuf), 0, oneLine(truncate(string(msg), 200)))
+		byMessage.addBytes(normBuf, 0, func() string {
+			return oneLine(truncate(string(msg), 200))
+		})
 		if r.SQLState != [5]byte{} {
-			byState.add(string(r.SQLState[:]), 0, "")
+			byState.addBytes(r.SQLState[:], 0, nil)
 		}
 		return nil
 	})
