@@ -142,19 +142,40 @@ func (r *remoteReader) Read(p []byte) (int, error) {
 func (r *remoteReader) drain(p []byte) int {
 	end := bytes.LastIndexByte(r.pending, '\n')
 	if end < 0 {
-		// No complete line. At end of file there will never be one, so
-		// what is held back is the file's final unterminated line and
-		// must be delivered.
-		if !r.flush || len(r.pending) == 0 {
+		switch {
+		case r.flush && len(r.pending) > 0:
+			// End of file: there will never be a newline, so what is
+			// held back is the file's final unterminated line.
+			end = len(r.pending) - 1
+		case int64(len(r.pending)) >= r.maxHeldBack():
+			// A file with no newline for this many bytes is not
+			// something this reader can frame, and continuing to
+			// hold it back would buffer the whole file. PERF-026
+			// puts peak memory at O(1) in input size, and an
+			// unbounded carry-over is the one place in this module
+			// where that could quietly fail.
+			//
+			// Hand it over instead: the parser has its own
+			// MaxRecordBytes and will skip and COUNT an over-long
+			// record (E18), which is a bounded and visible outcome
+			// rather than an invisible unbounded one.
+			end = len(r.pending) - 1
+		default:
 			return 0
 		}
-		end = len(r.pending) - 1
 	}
 	n := copy(p, r.pending[:end+1])
 	r.pending = r.pending[n:]
 	r.recordOffset()
 	return n
 }
+
+// maxHeldBack bounds the partial record carried between chunks.
+//
+// Two chunks: enough that a record straddling a boundary is always reassembled
+// -- a record longer than one chunk cannot be reassembled by any amount of
+// buffering short of the whole file -- and bounded, which is the point.
+func (r *remoteReader) maxHeldBack() int64 { return 2 * r.cfg.chunkSize() }
 
 // recordOffset stores how far the current file has been consumed: everything
 // fetched, less whatever is still held back.
