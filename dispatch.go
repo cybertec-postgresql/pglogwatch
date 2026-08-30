@@ -37,7 +37,23 @@ func (p *Parser) ensureFormat() bool {
 
 // splitRecord finds the end of the next record for the resolved format. It has
 // the shape of a bufio.SplitFunc; see splitFunc for the convention.
+//
+// It also decides whether the record it framed was cut short (FMT-009). The
+// test lives here rather than in each format's framer because the evidence is
+// the same for all three and is entirely about the STREAM: the input ended, the
+// record ran to the very last byte, and that byte was not a newline. Nothing
+// about the record's own syntax is involved, which is why a format-specific
+// answer would be three copies of one rule.
 func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
+	advance, token, err := p.splitByFormat(data, atEOF)
+	if token != nil && atEOF && advance == len(data) &&
+		len(data) > 0 && data[len(data)-1] != '\n' {
+		p.pendingFlags |= FlagTruncated
+	}
+	return advance, token, err
+}
+
+func (p *Parser) splitByFormat(data []byte, atEOF bool) (int, []byte, error) {
 	switch p.format {
 	case FormatCSV:
 		return splitCSVRecord(data, atEOF, p.cfg.emitTruncatedTail())

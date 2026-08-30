@@ -37,9 +37,15 @@ func (p *Parser) Next() bool {
 		p.rec.Offset = off
 		p.rec.Raw = tok
 		if err := p.parseInto(tok); err != nil {
+			p.pendingFlags = 0
 			p.reportMalformed(tok, err)
 			continue
 		}
+		// Merged after parsing, not before: parseInto assigns to
+		// Record.Flags and would otherwise overwrite what the framer
+		// found out.
+		p.rec.Flags |= p.pendingFlags
+		p.pendingFlags = 0
 		p.stats.Records++
 		return true
 	}
@@ -83,6 +89,7 @@ func (p *Parser) Reset(r io.Reader) {
 	p.stats = Stats{}
 	p.err = nil
 	p.done = false
+	p.pendingFlags = 0
 	p.format = p.cfg.Format
 	p.resetFormatState()
 	// The timezone cache and severity resolver are deliberately kept: they

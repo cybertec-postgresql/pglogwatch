@@ -60,6 +60,11 @@ type Parser struct {
 	// the record the caller sees.
 	detectRec Record
 
+	// pendingFlags carries facts the framer discovered about the record it
+	// just produced, which the field scanners have no way to see -- today
+	// only FlagTruncated. Applied and cleared once per record in Next.
+	pendingFlags Flags
+
 	// ready records that format and prefix detection have run, so the
 	// check at the top of Next is one boolean rather than repeated work.
 	ready bool
