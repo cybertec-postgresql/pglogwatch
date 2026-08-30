@@ -1,0 +1,7 @@
+2026-08-30 10:11:15.000 CEST [31337] app_user@appdb ERROR:  duplicate key value violates unique constraint "orders_pkey"
+2026-08-30 10:11:15.000 CEST [31337] app_user@appdb DETAIL:  Key (id)=(42) already exists.
+2026-08-30 10:11:15.000 CEST [31337] app_user@appdb HINT:  Use ON CONFLICT to ignore the duplicate.
+2026-08-30 10:11:15.000 CEST [31337] app_user@appdb STATEMENT:  INSERT INTO orders (id, total)
+	VALUES (42, 19.99)
+	RETURNING id;
+2026-08-30 10:11:16.000 CEST [31337] app_user@appdb LOG:  statement: SELECT 1

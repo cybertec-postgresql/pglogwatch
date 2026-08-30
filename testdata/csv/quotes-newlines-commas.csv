@@ -1,0 +1,6 @@
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,ERROR,42601,"syntax error at or near ""FROM""",,,,,,,,,"psql","client backend",,0
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,LOG,00000,"statement: SELECT a, b, c
+FROM t
+WHERE a = 1",,,,,,,,,"psql","client backend",,0
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,LOG,00000,"duration: 1.000 ms  statement: SELECT 1, 2, 3",,,,,,,,,"psql","client backend",,0
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,ERROR,22P02,"invalid input syntax for type integer: ""a,b""",,,,,,,,,"psql","client backend",,0

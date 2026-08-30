@@ -1,0 +1,2 @@
+2026-08-30 10:11:12.123 CEST [31337] app_user@appdb LOG:  statement: SELECT 1
+2026-08-30 10:11:13.123 CEST [42   ] LOG:  autovacuum launcher started

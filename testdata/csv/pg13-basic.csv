@@ -1,0 +1,2 @@
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,LOG,00000,"duration: 12.345 ms  statement: SELECT 1",,,,,,,,,"psql","client backend"
+2026-08-30 10:11:12.123 CEST,"app_user","appdb",31337,"10.0.0.5:52344",68b2c4a0.7a69,7,"SELECT",2026-08-30 10:10:00 CEST,3/15,0,ERROR,23505,"duplicate key value violates unique constraint ""orders_pkey""","Key (id)=(42) already exists.",,,,,,,,"psql","client backend"

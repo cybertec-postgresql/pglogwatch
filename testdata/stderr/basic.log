@@ -1,0 +1,4 @@
+2026-08-30 10:11:12.123 CEST [31337] app_user@appdb LOG:  duration: 1234.567 ms  statement: SELECT * FROM orders
+2026-08-30 10:11:13.001 CEST [31337] app_user@appdb ERROR:  relation "no_such_table" does not exist at character 15
+2026-08-30 10:11:13.001 CEST [31337] app_user@appdb STATEMENT:  SELECT * FROM no_such_table;
+2026-08-30 10:11:14.500 CEST [31338] LOG:  checkpoint starting: time

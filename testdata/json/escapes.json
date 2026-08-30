@@ -1,0 +1,2 @@
+{"timestamp":"2026-08-30 10:11:12.123 CEST","pid":31337,"error_severity":"LOG","message":"path C:\\data\\pg_log and a quote \" and a tab \t"}
+{"timestamp":"2026-08-30 10:11:12.124 CEST","pid":31337,"error_severity":"ERROR","state_code":"22021","message":"caf\u00e9 \ud83d\ude00 is not valid here"}
