@@ -1,0 +1,121 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Nightly, off the hour so it does not queue behind every other project's
+    # midnight cron (TST-007).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Duration per target, e.g. 30m or 4h"
+        required: false
+        default: "30m"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Each target must run even if another finds a crasher: they cover
+      # different code, and stopping the others would hide a second bug behind
+      # the first.
+      fail-fast: false
+      matrix:
+        target: [FuzzParseRecord, FuzzPrefixTemplate, FuzzUnquote]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      # The corpus is what makes a nightly 30 minutes worth more than the
+      # first 30 minutes ever run: without it every night restarts from the
+      # seeds and re-explores the same shallow inputs.
+      - name: Restore the fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.target }}-
+
+      - name: Fuzz
+        id: fuzz
+        run: |
+          go test -run '^$' -fuzz '^${{ matrix.target }}$' \
+            -fuzztime '${{ inputs.fuzztime || '30m' }}' . 2>&1 | tee fuzz.log
+
+      - name: Save the fuzz corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+
+      # A crasher is written into testdata/fuzz as a regression seed. Uploading
+      # it makes the failing input reproducible from the run page, without
+      # anyone having to recreate a 30-minute fuzzing session.
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crasher-${{ matrix.target }}
+          path: testdata/fuzz/
+          if-no-files-found: ignore
+
+      - name: File an issue for the crasher
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = '${{ matrix.target }}';
+            const title = `Fuzz crasher in ${target}`;
+
+            // One issue per target, reopened rather than duplicated: a crasher
+            // that survives several nights would otherwise file a new issue
+            // every night and bury the rest of the tracker.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              labels: 'fuzz',
+            });
+            const match = existing.data.find(i => i.title === title);
+            const body = [
+              `\`${target}\` found a crashing input during the nightly run.`,
+              '',
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              'The failing input is attached to that run as an artifact. To reproduce:',
+              '',
+              '1. download the artifact and unpack it into `testdata/fuzz/`',
+              `2. \`go test -run '${target}/<hash>' .\``,
+              '',
+              'COR-002 requires the parser never to panic, so this blocks the release',
+              'gate in VAL-005 until it is fixed and the input is committed as a seed.',
+            ].join('\n');
+
+            if (match && match.state === 'open') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: match.number, body,
+              });
+            } else if (match) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: match.number, state: 'open',
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: match.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['fuzz', 'bug'],
+              });
+            }
