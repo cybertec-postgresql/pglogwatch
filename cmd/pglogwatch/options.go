@@ -128,6 +128,15 @@ func (o *options) inRange(r *pglogwatch.Record) bool {
 // Order matters for the reports that show context or time buckets, so this is
 // the serial path; forEachParallel is the one --jobs uses.
 func (o *options) eachRecord(fn func(*pglogwatch.Record) error) error {
+	return o.eachRecordWithFormat(func(r *pglogwatch.Record, _ pglogwatch.Format) error {
+		return fn(r)
+	})
+}
+
+// eachRecordWithFormat is eachRecord for callers that need the resolved
+// format -- which unescaping does, since csvlog and jsonlog escape differently
+// and detection may have chosen either.
+func (o *options) eachRecordWithFormat(fn func(*pglogwatch.Record, pglogwatch.Format) error) error {
 	inputs, err := o.openInputs()
 	if err != nil {
 		return err
@@ -145,7 +154,7 @@ func (o *options) eachRecord(fn func(*pglogwatch.Record) error) error {
 			if !o.inRange(r) {
 				continue
 			}
-			if err := fn(r); err != nil {
+			if err := fn(r, p.DetectedFormat()); err != nil {
 				_ = rc.Close()
 				return err
 			}
