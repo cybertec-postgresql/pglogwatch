@@ -7,10 +7,10 @@ var commands = map[string]command{}
 // grepOptions holds grep's own flags; declared here so options can carry them
 // without commands.go depending on the order files are compiled in.
 type grepOptions struct {
-	pattern     string
-	before      int
-	after       int
-	ignoreCase  bool
-	invertMatch bool
-	fieldsOnly  bool
+	pattern    string
+	before     int
+	after      int
+	context    int
+	ignoreCase bool
+	invert     bool
 }
