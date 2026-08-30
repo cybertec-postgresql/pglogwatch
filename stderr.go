@@ -18,10 +18,29 @@ import (
 // T059 and the detection scoring in T061 test a candidate without having to
 // undo half-assigned fields.
 func (t *prefixTemplate) scanPrefix(line []byte, r *Record, tz *tzCache) ([]byte, bool) {
-	pos, ok := t.scanSegments(line, 0, 0, len(t.segs), r, tz)
+	pos, ok := t.scanSegments(line, 0, 0, t.optionalFrom, r, tz)
 	if !ok {
 		return nil, false
 	}
+	if t.optionalFrom >= len(t.segs) {
+		return line[pos:], true
+	}
+
+	// %q: everything after it is omitted by processes with no session (E5).
+	// Whether this line has that part is decided by trying to match it --
+	// there is no marker in the line to test.
+	//
+	// The match is attempted first with a nil Record, which assigns
+	// nothing. A single pass that assigned as it went would leave a
+	// half-filled record behind on failure, and the fields it had already
+	// written -- a user name taken from the word "checkpoint" -- would be
+	// wrong rather than merely absent. Undoing that would mean copying the
+	// Record before every attempt, which is more work per record than
+	// rescanning twenty bytes of prefix.
+	if _, ok := t.scanSegments(line, pos, t.optionalFrom+1, len(t.segs), nil, tz); !ok {
+		return line[pos:], true
+	}
+	pos, _ = t.scanSegments(line, pos, t.optionalFrom+1, len(t.segs), r, tz)
 	return line[pos:], true
 }
 
