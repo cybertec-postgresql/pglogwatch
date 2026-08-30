@@ -219,7 +219,9 @@ func makeEvent(r *rand.Rand, k eventKind, now time.Time, lineNum int64, i int) E
 
 	case kindAutovacuum:
 		e.Backend = "autovacuum worker"
-		e.User, e.Database, e.App, e.Host, e.Port = "", e.Database, "", "", 0
+		// An autovacuum worker has a database but no user, application or
+		// client -- which is what makes it exercise the %q prefix segment.
+		e.User, e.App, e.Host, e.Port = "", "", "", 0
 		e.Message = fmt.Sprintf(
 			"automatic vacuum of table \"%s.public.%s\": index scans: 1\n\tpages: 0 removed, %d remain\n\ttuples: %d removed, %d remain",
 			e.Database, table, r.IntN(100000), r.IntN(50000), r.IntN(1000000))
