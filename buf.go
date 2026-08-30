@@ -44,6 +44,10 @@ type buf struct {
 	initial  int
 	skipping bool // discarding an over-large record until the next newline
 
+	// bomChecked records that the head of the stream has been inspected for
+	// a byte order mark, so the check happens once rather than per record.
+	bomChecked bool
+
 	stats *Stats
 }
 
@@ -65,11 +69,45 @@ func (b *buf) reset(src io.Reader) {
 	b.err = nil
 	b.atEOF = false
 	b.skipping = false
+	b.bomChecked = false
+}
+
+// utf8BOM is the byte order mark, which appears at the head of a log that has
+// been through a Windows editor or a helpful text pipeline.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// consumeBOM drops a leading byte order mark, once per stream.
+//
+// Without this the mark becomes three bytes in front of the first record,
+// which breaks the timestamp scan and therefore format detection: one
+// invisible byte sequence at the head of a file would make the whole log
+// unparseable, with nothing in the output to explain why (E17).
+//
+// The mark is CONSUMED rather than skipped, so Record.Offset stays a true file
+// position -- an offset that ignored three bytes at the head would be wrong
+// for every record in the file and would resume in the wrong place.
+func (b *buf) consumeBOM() {
+	if b.bomChecked {
+		return
+	}
+	b.bomChecked = true
+	if b.consumed != 0 {
+		return // mid-file, after a Seek: nothing here is a file header
+	}
+	for b.w-b.r < len(utf8BOM) && !b.atEOF {
+		if !b.fill() {
+			b.atEOF = true
+		}
+	}
+	if bytes.HasPrefix(b.data[b.r:b.w], utf8BOM) {
+		b.advance(len(utf8BOM))
+	}
 }
 
 // next returns the next record, its offset in the stream, and an error.
 // io.EOF means the stream is exhausted; every other error is fatal.
 func (b *buf) next(split splitFunc) ([]byte, int64, error) {
+	b.consumeBOM()
 	for {
 		if b.skipping {
 			if !b.discardToNewline() {
@@ -222,6 +260,7 @@ func indexNewline(b []byte) int { return bytes.IndexByte(b, '\n') }
 // The returned slice is invalidated by any later call that grows or compacts
 // the buffer, which is the same contract records have.
 func (b *buf) peek(want int) []byte {
+	b.consumeBOM()
 	if want > b.max {
 		want = b.max
 	}
