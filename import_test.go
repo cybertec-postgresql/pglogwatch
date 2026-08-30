@@ -1,9 +1,13 @@
 package pglogwatch_test
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestImportsAreStandardLibraryOnly is the executable form of AC-021 and
@@ -80,4 +84,61 @@ func goListDeps(t *testing.T, pkg string) []string {
 func isStdlib(pkg string) bool {
 	first, _, _ := strings.Cut(pkg, "/")
 	return !strings.Contains(first, ".")
+}
+
+// TestNestedModulesDoNotReachTheRoot is PKG-004 stated as a test.
+//
+// The nested modules exist so that a consumer who only parses inherits
+// nothing: pgx, klauspost/compress and ulikunitz/xz are real dependencies with
+// real transitive graphs, and the moment one of them becomes reachable from
+// the root package the module's central claim stops being true.
+//
+// The root go.mod is the thing to check rather than the import graph, because
+// a require line is enough to affect a consumer's build even before any code
+// imports it.
+func TestNestedModulesDoNotReachTheRoot(t *testing.T) {
+	data, err := os.ReadFile("go.mod")
+	require.NoError(t, err)
+
+	forbidden := []string{
+		"github.com/jackc/pgx",
+		"github.com/klauspost/compress",
+		"github.com/ulikunitz/xz",
+		"github.com/pashagolub/pgxmock",
+	}
+	for _, dep := range forbidden {
+		assert.NotContains(t, string(data), dep,
+			"PKG-004: %s belongs to a nested module and must not appear in the root go.mod", dep)
+	}
+}
+
+// TestRootRequiresOnlyTestDependencies checks PKG-002 and PKG-003 together:
+// the root module may require testify, and whatever testify itself needs, and
+// nothing else.
+//
+// Listing the permitted set rather than counting it means a new dependency
+// fails with its own name in the message.
+func TestRootRequiresOnlyTestDependencies(t *testing.T) {
+	data, err := os.ReadFile("go.mod")
+	require.NoError(t, err)
+
+	permitted := map[string]bool{
+		"github.com/stretchr/testify":           true, // PKG-003
+		"github.com/davecgh/go-spew":            true, // testify
+		"github.com/pmezani/go-difflib":         true, // testify
+		"github.com/pmezani/go-difflib/difflib": true,
+		"go.yaml.in/yaml/v3":                    true, // testify
+		"gopkg.in/yaml.v3":                      true, // testify
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "github.com/") &&
+			!strings.HasPrefix(line, "gopkg.in/") &&
+			!strings.HasPrefix(line, "go.yaml.in/") {
+			continue
+		}
+		name, _, _ := strings.Cut(line, " ")
+		assert.True(t, permitted[name],
+			"unexpected dependency %q in the root go.mod; PKG-002 allows only test dependencies", name)
+	}
 }
