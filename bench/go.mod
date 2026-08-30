@@ -1,3 +1,12 @@
 module github.com/cybertec-postgresql/pglogwatch/bench
 
 go 1.24
+
+require github.com/cybertec-postgresql/pglogwatch v0.0.0
+
+require (
+	github.com/stretchr/testify v1.12.1
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+)
+
+replace github.com/cybertec-postgresql/pglogwatch => ..
