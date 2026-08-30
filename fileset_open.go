@@ -48,9 +48,15 @@ type fileSetReader struct {
 	done     map[string]bool
 	pending  []byte // bytes read from cur but not yet a complete line
 	finished bool
-	closed   bool
-	closeMu  sync.Mutex
-	scratch  []byte
+
+	// flush marks that the current file is done, so the bytes still held
+	// back are a final line that will never gain a newline and must be
+	// delivered rather than withheld (FMT-009 decides what the parser then
+	// does with it).
+	flush   bool
+	closed  bool
+	closeMu sync.Mutex
+	scratch []byte
 }
 
 func (fs *FileSet) open(ctx context.Context) (io.ReadCloser, error) {
@@ -81,6 +87,7 @@ func (r *fileSetReader) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		if r.cur == nil {
+			r.flush = false
 			if !r.openNext() {
 				if !r.fs.Follow {
 					r.finished = true
@@ -106,7 +113,10 @@ func (r *fileSetReader) Read(p []byte) (int, error) {
 func (r *fileSetReader) drainPending(p []byte) int {
 	end := lastNewline(r.pending)
 	if end < 0 {
-		return 0
+		if !r.flush || len(r.pending) == 0 {
+			return 0
+		}
+		end = len(r.pending) - 1
 	}
 	n := copy(p, r.pending[:end+1])
 	r.pending = r.pending[n:]
@@ -239,12 +249,26 @@ func (r *fileSetReader) currentFileWasReplaced() bool {
 }
 
 // closeCurrent finishes with the open file.
+//
+// Anything still held back becomes deliverable: the file is finished, so its
+// last line will never gain a newline, and withholding it would drop the record
+// entirely. FMT-009 then decides whether the parser emits it with FlagTruncated
+// or discards it -- which is the caller's choice, not the reader's to make by
+// omission.
+//
+// The stored offset advances to everything READ, not merely everything
+// delivered so far, because that fragment is about to be delivered. Leaving the
+// offset short of it would re-deliver it on every later pass, forever.
 func (r *fileSetReader) closeCurrent() {
 	if r.cur == nil {
 		return
 	}
+	if r.curPath != "" {
+		r.fs.offsets().Set(r.curPath, r.curPos)
+	}
 	_ = r.cur.Close()
 	r.done[r.curPath] = true
+	r.flush = true
 	r.cur, r.curPath, r.curID = nil, "", fileIdentity{}
 	r.curPos = 0
 }

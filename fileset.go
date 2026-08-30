@@ -97,6 +97,18 @@ func (fs *FileSet) isSameFileAsLastTime(path string, id fileIdentity) bool {
 // across rotation, and while following it withholds a partially written
 // trailing record rather than emitting half of one (IFC-005). Close it when
 // done; a following reader stops at the next poll after ctx is cancelled.
+//
+// # Resumption
+//
+// Offsets are recorded as bytes are DELIVERED to the caller, so draining the
+// stream to the end leaves each file's offset at its size, and the next Open
+// reads only what has been appended since (IFC-006, AC-025).
+//
+// A caller that abandons a stream part-way may re-read a little: the parser
+// buffers ahead, so bytes handed to it but not yet returned as records are
+// already counted as read. Draining the stream -- reading until Next returns
+// false -- avoids this entirely, and is what a collector loop does anyway.
+// Nothing is ever SKIPPED, which is the direction that would lose log events.
 func (fs *FileSet) Open(ctx context.Context) (io.ReadCloser, error) {
 	return fs.open(ctx)
 }
