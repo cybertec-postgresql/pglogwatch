@@ -162,3 +162,64 @@ func TestStderrStatementMirrorsQuery(t *testing.T) {
 	assert.Equal(t, string(recs[0].Statement), string(recs[0].Query),
 		"Query and Statement must agree, as they do on the csvlog path")
 }
+
+// TestSplitContinuationsContract pins what Config.SplitContinuations actually
+// produces, beyond the record count checked earlier.
+//
+// The option exists for callers who want the physical event stream -- a grep
+// tool, a tail follower -- rather than logical records. What they get has to be
+// predictable: each continuation must arrive as a record whose label is
+// recoverable and whose text is in the field the label names.
+func TestSplitContinuationsContract(t *testing.T) {
+	recs, p := parseFixture(t, "stderr/multiline.log", Config{
+		Format:             FormatStderr,
+		LinePrefix:         multilinePrefix,
+		SplitContinuations: true,
+	})
+	require.Len(t, recs, 5)
+	assert.Zero(t, p.Stats().Malformed, "a split continuation is not malformed")
+	assert.Equal(t, int64(5), p.Stats().Records)
+
+	// The parent keeps its own message and nothing else.
+	assert.Equal(t, SeverityError, recs[0].Severity)
+	assert.Empty(t, recs[0].Detail)
+	assert.Empty(t, recs[0].Hint)
+	assert.Empty(t, recs[0].Statement)
+
+	// Each continuation is a record: the label is recoverable through
+	// RawSeverity, and the text lands in the field that label names.
+	assert.Equal(t, "DETAIL", string(recs[1].RawSeverity))
+	assert.Equal(t, "Key (id)=(42) already exists.", string(recs[1].Detail))
+
+	assert.Equal(t, "HINT", string(recs[2].RawSeverity))
+	assert.Equal(t, "Use ON CONFLICT to ignore the duplicate.", string(recs[2].Hint))
+
+	assert.Equal(t, "STATEMENT", string(recs[3].RawSeverity))
+	assert.Contains(t, string(recs[3].Statement), "INSERT INTO orders")
+
+	// A continuation label is not a severity, and must not be reported as
+	// one -- a caller counting severities would otherwise see three extra
+	// events of an unknown kind for every error.
+	for _, r := range recs[1:4] {
+		assert.Equal(t, SeverityUnknown, r.Severity)
+	}
+
+	// Prefix-derived fields still parse on a continuation line, since the
+	// server writes the full prefix on each.
+	assert.Equal(t, int32(31337), recs[1].ProcessID)
+	assert.Equal(t, "app_user", string(recs[1].User))
+}
+
+func TestSplitContinuationsKeepsWrappedLinesTogether(t *testing.T) {
+	// Even when splitting, a wrapped line has no prefix of its own and so
+	// cannot become a record: it belongs to the labelled line above it.
+	recs, _ := parseFixture(t, "stderr/multiline.log", Config{
+		Format:             FormatStderr,
+		LinePrefix:         multilinePrefix,
+		SplitContinuations: true,
+	})
+	require.Len(t, recs, 5)
+	stmt := string(recs[3].Statement)
+	assert.Contains(t, stmt, "VALUES (42, 19.99)")
+	assert.Contains(t, stmt, "RETURNING id;")
+}
