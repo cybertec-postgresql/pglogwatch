@@ -17,6 +17,13 @@ var ErrNotSeekable = &parseError{msg: "pglogwatch: the underlying reader does no
 // for something that is not there. Stopping lets the caller notice.
 const maxResyncLines = 1024
 
+// resyncPeekBytes is how much input resynchronisation looks at per step.
+//
+// It only needs one whole line. Peeking the detection window instead -- 256 KiB
+// -- costs an extra read of that size for every shard ParallelScan creates,
+// which on a 32 MiB corpus split 64 ways is more added reading than parsing.
+const resyncPeekBytes = 8 << 10
+
 // Seek repositions the parser at a byte offset and resynchronises to the next
 // record boundary.
 //
@@ -60,6 +67,13 @@ func (p *Parser) Seek(offset int64) error {
 	if offset == 0 {
 		return nil
 	}
+	// Resynchronisation asks "does this line start a record", which is a
+	// per-format question -- so the format has to be resolved first. It is
+	// not, when Seek is the first thing called on a parser, which is
+	// exactly what ParallelScan does for every shard after the first.
+	if !p.ensureFormat() {
+		return nil // nothing left to read
+	}
 	p.resync()
 	return nil
 }
@@ -77,7 +91,7 @@ func (p *Parser) Seek(offset int64) error {
 // the remaining lines of that record ahead, and they are not records.
 func (p *Parser) resync() {
 	for range maxResyncLines {
-		sample := p.buf.peek(detectPeekBytes)
+		sample := p.buf.peek(resyncPeekBytes)
 		line, ok := firstNonEmptyLine(sample)
 		if !ok {
 			return // end of input; nothing to resynchronise to

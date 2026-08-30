@@ -9,12 +9,20 @@ package pglogwatch
 // both PostgreSQL's default destination and the format whose parser tolerates
 // anything.
 
+// formatPeekBytes bounds what format detection reads. One log line is far
+// shorter; the margin is for a pathologically long first line.
+const formatPeekBytes = 64 << 10
+
 // detectFormat inspects the buffered input and picks a destination.
 //
 // It reports false only when the stream ends before any non-empty line is
 // available, in which case there is nothing to parse either.
 func (p *Parser) detectFormat() (Format, bool) {
-	sample := p.buf.peek(detectPeekBytes)
+	// One line is enough: FMT-005's test looks only at the first non-empty
+	// one. Peeking the full detection window would read 256 KiB before the
+	// first record of every stream, which ParallelScan multiplies by the
+	// number of shards.
+	sample := p.buf.peek(formatPeekBytes)
 	line, ok := firstNonEmptyLine(sample)
 	if !ok {
 		return FormatAuto, false
