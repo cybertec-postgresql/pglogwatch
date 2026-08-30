@@ -408,3 +408,67 @@ func TestResetMidStream(t *testing.T) {
 	assert.Zero(t, p.Record().Offset, "offsets restart with the new stream")
 	assert.False(t, p.Next())
 }
+
+func TestStderrPrefixMismatchIsCounted(t *testing.T) {
+	// FMT-010 on the stderr path. A line that does not match the prefix in
+	// force cannot be attributed to any field, so it is counted and the
+	// stream carries on.
+	//
+	// Without this, Stats.Malformed is always zero for stderr, and an
+	// operator whose LinePrefix is wrong -- by far the most likely stderr
+	// misconfiguration -- gets a clean-looking scan producing nonsense.
+	// The unmatched line is placed FIRST on purpose. A stray line in the
+	// middle of a log is not malformed at all: FMT-006 makes it a
+	// continuation of the record above it, which is how wrapped statements
+	// work. Only a line at a record boundary, with nothing above it to
+	// belong to, is genuinely unattributable.
+	in := "this line has no prefix at all\n" +
+		"2026-08-30 10:11:12.123 CEST [1] LOG:  good\n" +
+		"2026-08-30 10:11:13.123 CEST [1] LOG:  also good\n"
+	var reported []string
+	p := New(strings.NewReader(in), Config{
+		Format:      FormatStderr,
+		LinePrefix:  "%m [%p] ",
+		OnMalformed: func(line []byte, _ error) { reported = append(reported, string(line)) },
+	})
+	var msgs []string
+	for p.Next() {
+		msgs = append(msgs, string(p.Record().Message))
+	}
+	require.NoError(t, p.Err())
+	assert.Equal(t, []string{"good", "also good"}, msgs)
+	assert.Equal(t, int64(1), p.Stats().Malformed)
+	assert.Equal(t, []string{"this line has no prefix at all"}, reported)
+}
+
+func TestStderrWrongPrefixIsLoud(t *testing.T) {
+	// The scenario the counter exists for: a real log read with the wrong
+	// LinePrefix. Every line should be counted, so the caller can see that
+	// the configuration is wrong rather than silently getting nothing.
+	p := New(bytes.NewReader(fixture(t, "stderr/basic.log")), Config{
+		Format:     FormatStderr,
+		LinePrefix: "totally-not-the-prefix %p ",
+	})
+	for p.Next() { //nolint:revive // drain
+	}
+	require.NoError(t, p.Err(), "a wrong prefix must not be fatal")
+	assert.NotZero(t, p.Stats().Malformed, "a wrong prefix must be visible in Stats")
+	assert.Zero(t, p.Stats().Records)
+}
+
+func TestStderrWithoutAnyPrefixStillEmits(t *testing.T) {
+	// The other side of the same rule: when NO prefix is in force -- none
+	// configured and none detected -- there is nothing to mismatch, so an
+	// unstructured line is a record with its text as the message (COR-001)
+	// rather than a malformed line.
+	p := New(strings.NewReader("some completely unstructured line\nanother one\n"),
+		Config{Format: FormatStderr})
+	n := 0
+	for p.Next() {
+		assert.NotEmpty(t, p.Record().Message)
+		n++
+	}
+	require.NoError(t, p.Err())
+	assert.Equal(t, 2, n)
+	assert.Zero(t, p.Stats().Malformed)
+}

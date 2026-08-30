@@ -348,11 +348,22 @@ func (p *Parser) parseStderrInto(rec []byte) error {
 			first = false
 			rest, matched := p.prefixOrNil().scanPrefixOrAll(line, r, &p.tz)
 			if !matched {
-				// Matches no prefix at all, but it is still a
-				// line of the log: emit it with its text as the
-				// message rather than discard it (COR-001).
-				r.Message = rec
-				return nil
+				// A line that does not match the prefix in force
+				// cannot be attributed to any field, so FMT-010
+				// counts it and the stream carries on.
+				//
+				// This is the only way Stats.Malformed becomes
+				// meaningful for stderr. Without it the counter
+				// is always zero for this format, and an
+				// operator whose LinePrefix is wrong -- the most
+				// likely stderr misconfiguration by far -- gets
+				// a clean-looking scan producing nonsense.
+				//
+				// Reached only for the FIRST line of a record:
+				// later lines that fail to match are folded as
+				// continuations by the framer, which is where
+				// wrapped statements go.
+				return errPrefixMismatch
 			}
 			fieldStart, fieldEnd = end-len(rest), end
 			if label, msg, hasLabel := splitLabel(rest); hasLabel {
