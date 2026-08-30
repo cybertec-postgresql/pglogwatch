@@ -3,6 +3,7 @@ package pglogwatch
 import (
 	"bytes"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,4 +68,53 @@ func TestParallelScanUsesEveryWorker(t *testing.T) {
 		used[w] = true
 	}
 	assert.Len(t, used, 4, "every worker must receive some records")
+}
+
+func TestParallelScanDetectsFormatFromTheHead(t *testing.T) {
+	// Format detection reads the first non-empty line. At a shard's start
+	// that line is almost always a FRAGMENT, so a shard that detected
+	// locally would classify a jsonlog file as stderr -- its fragment does
+	// not begin with a brace -- and then parse the whole shard wrongly
+	// while reporting no errors at all.
+	//
+	// Every earlier parallel test passed an explicit Format, so none of them
+	// could see this. It was found by running the CLI over the generated
+	// corpus, where the counts disagreed with the manifest.
+	for _, c := range []struct {
+		name   string
+		file   string
+		expect Format
+	}{
+		{"jsonlog", "json/basic.json", FormatJSON},
+		{"csvlog", "csv/pg14-basic.csv", FormatCSV},
+		{"stderr", "stderr/basic.log", FormatStderr},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			data := bytes.Repeat(fixture(t, c.file), 400)
+
+			// The count a single parser gets, with detection.
+			p := New(bytes.NewReader(data), Config{})
+			want := 0
+			for p.Next() {
+				want++
+			}
+			require.NoError(t, p.Err())
+			require.Equal(t, c.expect, p.DetectedFormat())
+			require.Positive(t, want)
+
+			// The same, sharded, with detection left to each worker.
+			var mu sync.Mutex
+			got := 0
+			require.NoError(t, ParallelScan(t.Context(),
+				[]io.ReaderAt{bytes.NewReader(data)}, Config{}, 8,
+				func(_ int, _ *Record) error {
+					mu.Lock()
+					got++
+					mu.Unlock()
+					return nil
+				}))
+			assert.Equal(t, want, got,
+				"auto-detection must give the same record count sharded as serial")
+		})
+	}
 }

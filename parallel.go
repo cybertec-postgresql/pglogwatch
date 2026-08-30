@@ -127,6 +127,18 @@ func scanShard(ctx context.Context, p *Parser, s shard, worker int,
 	// the FILE and the parser can resynchronise using bytes before the
 	// shard's start.
 	p.Reset(io.NewSectionReader(s.src, 0, s.size))
+
+	// Resolve the format -- and, for stderr, log_line_prefix -- from the
+	// HEAD of the source, before seeking into the shard.
+	//
+	// Detection reads the first non-empty line, and at a shard's start that
+	// line is almost always a fragment: a jsonlog file detects as stderr
+	// because the fragment does not begin with a brace, and every shard but
+	// the first then parses the whole file wrongly while reporting no
+	// errors. Seek preserves detection state once it is resolved, so doing
+	// it here costs one peek per shard and fixes it.
+	p.ensureFormat()
+
 	if err := p.Seek(s.start); err != nil {
 		return err
 	}
