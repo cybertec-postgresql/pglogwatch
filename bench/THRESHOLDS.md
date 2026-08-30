@@ -98,8 +98,8 @@ skips. **Not yet verified**; it needs the pinned runner.
 |---|---|
 | PERF-026 memory O(1) in input size | **met** — measured, see below |
 | PERF-026 under 64 MiB for a 10 GB input | **met in substance** — 563 KB at 400 000 records; the 10 GB scale itself was not run |
-| PERF-026 measured as peak **RSS** | **not measured** — the platform cannot |
-| PERF-027 peak RSS under 25 % of pgbadger's, at most 1.25× pgweasel's | **not verified** — baselines not installed |
+| PERF-026 measured as peak **RSS** | **met** — 3.6–5.0 MB in the container, against a 64 MiB bound; not measurable on the development machine |
+| PERF-027 peak RSS under 25 % of pgbadger's, at most 1.25× pgweasel's | **met** — 4.0 MB against pgbadger's 66.3 MB (6 %) and pgweasel's 75.2 MB (0.05×); see below |
 | PERF-028 top-K aggregations O(K), not O(distinct) | **met** — flat across a 10× input in all four reports |
 
 `TestMemoryDoesNotGrowWithInput` samples the heap on a timer while parsing, so
@@ -119,11 +119,13 @@ The bound itself is met with three orders of magnitude to spare: 563 KB against
 minutes and 10 GB of disk — but the parser holds one buffer and one record, and
 the scaling table above is what licenses the inference.
 
-**RSS specifically cannot be measured here.** Go exposes a child's peak resident
-set through `ru_maxrss`, which Windows does not provide, so
+**RSS is measured in the container, not on this machine.** Go exposes a child's
+peak resident set through `ru_maxrss`, which Windows does not provide, so
 `bench/compare/rss_other.go` reports "not measured" rather than a zero that
-would read as "used no memory". On the pinned Linux runner (T146) the
-comparative harness will report it directly.
+would read as "used no memory". Under Linux the comparative harness reports it
+directly, and it is 3.6–5.0 MB across all five workloads -- flat, including the
+eight-worker one. Two independent measurements of the same property now agree:
+the heap sampler says 563 KB of Go heap, the kernel says under 5 MB resident.
 
 Two independent guards keep the O(1) property from regressing: the read buffer
 is capped by `Config.MaxRecordBytes`, and `TestParserBufferGrowsThenSettles`
@@ -133,16 +135,87 @@ bounded by `--top`.
 PERF-028 is met and measured: allocation for the errors, slow, connections and
 peaks reports is identical for 2 000 and 20 000 distinct records.
 
-## Comparative (PERF-024, PERF-025, AC-016, AC-017)
+## Comparative (PERF-024, PERF-025, PERF-027, AC-016, AC-017)
 
-**Not verified.** pgbadger and pgweasel are not installed on this machine, so
-the ratios cannot be computed at all. `make bench-compare` runs and produces a
-table with those cells marked "not installed", and
-`TestAllThreeToolsAgree` skips with a message naming what is missing.
+**Measured, in a container, not on the pinned runner.** Neither baseline is
+installed on the development machine, and PERF-027 is stated in peak RSS, which
+Go reads through `ru_maxrss` -- a Unix facility Windows does not provide. A
+throwaway Linux image with both baselines makes all three thresholds measurable
+at once.
 
-This is the largest outstanding gap in the release assessment, and it is
-infrastructure rather than code: INF-003 pins the baseline versions on the
-runner that T146 has not yet acquired.
+| item | value |
+|---|---|
+| image | `golang:1.24-bookworm`, pgweasel built from source in `rust:1-bookworm` |
+| pgbadger | 12.0 (Debian bookworm package) |
+| pgweasel | 0.1, commit `f2abfe42ac04316bfe889a2ea7ddd658fc5f26ec` |
+| corpus | corpus-v1, seed 20260830, 200 000 records, 61 MB csvlog |
+| runs | 5, after 2 discarded warmups |
+
+The container runs on the same unpinned laptop, so **these figures may not be
+published as meeting a threshold** (VAL-004). They establish which thresholds
+hold and which do not; the pinned runner establishes the numbers.
+
+### Speed
+
+| workload | pglogwatch | pgbadger | ratio | pgweasel | ratio |
+|---|---:|---:|---:|---:|---:|
+| W1 parse and discard | 0.089 s | 12.269 s | **138.5×** | _not implemented_ | — |
+| W2 severity histogram | 0.114 s | 11.258 s | **98.8×** | _not implemented_ | — |
+| W3 errors report | 0.091 s | 11.268 s | **123.5×** | 0.073 s | **0.80×** |
+| W4 top slow queries | 0.107 s | 11.254 s | **104.8×** | 0.276 s | **2.57×** |
+| W5 parallel, 8 workers | 0.054 s | 14.447 s | **269.4×** | _not implemented_ | — |
+
+**PERF-024 (≥ 10× `pgbadger -j 1`) is met in every workload**, by 99–269×. The
+margin is large because the comparison is not equal and does not claim to be:
+pgbadger has no parse-only mode and builds a complete in-memory report in every
+row, which `-o /dev/null` discards without skipping. `bench/PGBADGER.md` sets
+that out. The specification's own rationale (§7.5) calls the 10× threshold
+conservative by roughly two orders of magnitude, and this is what that looks
+like measured.
+
+**PERF-025 (≥ parity with pgweasel) cannot be assessed on three of five
+workloads**: pgweasel 0.1's `stats` subcommand is not implemented. It prints an
+error, writes nothing, and exits 0 -- which the harness originally timed and
+reported as pglogwatch losing by 7×. It now refuses the cell instead.
+
+### PERF-025 W3: not met, at 0.80×
+
+pgweasel produces its error report in 0.073 s against pglogwatch's 0.091 s --
+833 MB/s to 669 MB/s. This is a real measurement of two tools doing comparable
+work, and it is recorded as unmet rather than explained away.
+
+What the timing does not show is the other half of the trade. pgweasel used
+**75.2 MB** of resident memory to pglogwatch's **4.0 MB**, and emitted 8.5 MB of
+raw matching lines where pglogwatch emits an aggregated histogram with top
+messages. It is buying that 25 % with roughly nineteen times the memory and a
+different, cheaper output.
+
+**Remediation.** The gap is small enough to be within reach and the cause is not
+yet established -- it may be the top-K normalisation, or output formatting, both
+of which pgweasel is not doing. Profile W3 before changing anything. PERF-025
+targets 1.2×, so parity alone would not close it.
+
+### Memory (PERF-027)
+
+Peak RSS, maximum across runs, now that a platform reports it:
+
+| workload | pglogwatch | pgbadger | pgweasel |
+|---|---:|---:|---:|
+| W1 | 3.8 MB | 66.3 MB | — |
+| W2 | 3.6 MB | 66.2 MB | — |
+| W3 | 4.0 MB | 66.3 MB | 75.2 MB |
+| W4 | 4.2 MB | 66.3 MB | 105.3 MB |
+| W5 | 5.0 MB | 69.1 MB | — |
+
+**PERF-027 is met with a wide margin.** The requirement is under 25 % of
+pgbadger's and at most 1.25× pgweasel's; the measurement is 6 % of pgbadger's
+and 0.05× pgweasel's. Both baselines hold the log in memory and pglogwatch does
+not, which is the whole design, and this is the first measurement that shows it
+against something rather than against itself.
+
+Note that pglogwatch's RSS is flat at 3.6–5.0 MB across every workload,
+including the eight-worker one, while pgweasel's varies with the report
+(75 MB to 105 MB).
 
 ## Regression gate (PERF-030)
 
