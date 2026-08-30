@@ -265,3 +265,68 @@ func TestBoundaryVeryLongLineOfNulls(t *testing.T) {
 	require.NoError(t, p.Err())
 	assert.Equal(t, []string{"after the damage"}, msgs)
 }
+
+// countingReader reports how many times Read was called, so a test can assert
+// that a finished parser stops touching its source.
+type countingReader struct {
+	r     *strings.Reader
+	reads int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	c.reads++
+	return c.r.Read(p)
+}
+
+func TestNextIsIdempotentAtEOF(t *testing.T) {
+	// IFC-001: Next returns false exactly once at end of input, and further
+	// calls keep returning false WITHOUT SIDE EFFECTS.
+	//
+	// "Without side effects" is the operative half. A range loop that breaks
+	// early and is re-entered, an iterator adaptor, or a caller polling a
+	// finished parser will all call Next again; if that re-read the source
+	// or bumped a counter, a followed file would report phantom activity.
+	src := &countingReader{r: strings.NewReader(string(fixture(t, "json/basic.json")))}
+	p := New(src, Config{Format: FormatJSON})
+	for p.Next() { //nolint:revive // drain
+	}
+	require.NoError(t, p.Err())
+
+	before := p.Stats()
+	readsBefore := src.reads
+
+	for range 100 {
+		assert.False(t, p.Next())
+	}
+	assert.Equal(t, before, p.Stats(), "Next must not change Stats after EOF")
+	assert.Equal(t, readsBefore, src.reads, "Next must not read the source after EOF")
+	assert.NoError(t, p.Err())
+}
+
+func TestNextIsIdempotentAfterFatalError(t *testing.T) {
+	// The same, on the other exit path. Err must keep reporting the same
+	// error rather than being cleared or replaced by a later io.EOF.
+	p := New(&errReader{data: `{"error_severity":"LOG","message":"ok"}` + "\n"},
+		Config{Format: FormatJSON})
+	require.True(t, p.Next())
+	require.False(t, p.Next())
+
+	first := p.Err()
+	require.Error(t, first)
+	for range 10 {
+		assert.False(t, p.Next())
+		assert.Equal(t, first, p.Err(), "the first fatal error must be the one reported")
+	}
+}
+
+func TestRecordPointerIsStable(t *testing.T) {
+	// IFC-002: Record returns the same pointer for the parser's lifetime,
+	// so a caller may hold it across iterations -- only the contents change.
+	p := New(bytes.NewReader(fixture(t, "json/basic.json")), Config{Format: FormatJSON})
+	require.True(t, p.Next())
+	first := p.Record()
+	for p.Next() {
+		assert.Same(t, first, p.Record())
+	}
+	assert.Same(t, first, p.Record(), "even after EOF")
+}
