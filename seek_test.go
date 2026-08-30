@@ -1,0 +1,183 @@
+package pglogwatch
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Parser.Seek (IFC-006, AC-025, §7.6).
+//
+// This is what makes resumption O(1). The implementation this module replaces
+// resumed by calling ReadString in a loop as many times as it had previously
+// read lines -- re-reading the whole file after every restart. The tests below
+// are mostly about the awkward part: an offset need not land on a record
+// boundary, and the parser has to recover from that without inventing records.
+
+// recordOffsets parses a stream and returns every record's offset and message.
+func recordOffsets(t *testing.T, data []byte, cfg Config) ([]int64, []string) {
+	t.Helper()
+	p := New(bytes.NewReader(data), cfg)
+	var offs []int64
+	var msgs []string
+	for p.Next() {
+		offs = append(offs, p.Record().Offset)
+		msgs = append(msgs, string(p.Record().Message))
+	}
+	require.NoError(t, p.Err())
+	return offs, msgs
+}
+
+func TestSeekResumesExactlyAtARecordBoundary(t *testing.T) {
+	// AC-025's core promise: resuming at a recorded offset counts nothing
+	// twice and skips nothing.
+	for _, c := range []struct {
+		name   string
+		file   string
+		format Format
+	}{
+		{"csvlog", "csv/pg14-basic.csv", FormatCSV},
+		{"jsonlog", "json/basic.json", FormatJSON},
+		{"stderr", "stderr/basic.log", FormatStderr},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			data := fixture(t, c.file)
+			cfg := Config{Format: c.format}
+			offs, msgs := recordOffsets(t, data, cfg)
+			require.Greater(t, len(offs), 2)
+
+			for i := range offs {
+				p := New(bytes.NewReader(data), cfg)
+				require.NoError(t, p.Seek(offs[i]))
+
+				var got []string
+				for p.Next() {
+					got = append(got, string(p.Record().Message))
+				}
+				require.NoError(t, p.Err())
+				assert.Equal(t, msgs[i:], got,
+					"seeking to record %d must resume exactly there", i)
+			}
+		})
+	}
+}
+
+func TestSeekFromAnArbitraryOffsetResynchronises(t *testing.T) {
+	// The offset need not be a boundary. Seeking into the middle of a
+	// record must discard that record's tail and continue from the next
+	// one -- never emit the tail as if it were a record.
+	data := fixture(t, "json/basic.json")
+	_, msgs := recordOffsets(t, data, Config{Format: FormatJSON})
+
+	for off := range int64(len(data)) {
+		p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+		require.NoError(t, p.Seek(off))
+
+		var got []string
+		for p.Next() {
+			got = append(got, string(p.Record().Message))
+		}
+		require.NoError(t, p.Err())
+
+		// Whatever survived must be a suffix of the full record list:
+		// no invented records, no partial ones, no reordering.
+		require.LessOrEqual(t, len(got), len(msgs), "offset %d produced extra records", off)
+		// append onto a nil slice so an empty suffix compares as nil,
+		// which is what the loop above produces when nothing survives.
+		want := append([]string(nil), msgs[len(msgs)-len(got):]...)
+		assert.Equal(t, want, got, "offset %d", off)
+	}
+}
+
+func TestSeekIntoAMultiLineRecord(t *testing.T) {
+	// Landing inside a multi-line record is where a naive "skip to the next
+	// newline" resync fails: the next newline is still inside the record,
+	// and its remaining lines are not records. The parser must skip lines
+	// until one actually starts a record.
+	data := fixture(t, "csv/quotes-newlines-commas.csv")
+	cfg := Config{Format: FormatCSV}
+	offs, msgs := recordOffsets(t, data, cfg)
+	require.Len(t, offs, 4)
+
+	// Record 1 is the one spanning three physical lines. Seek into the
+	// middle of it.
+	mid := offs[1] + 40
+	require.Less(t, mid, offs[2])
+
+	p := New(bytes.NewReader(data), cfg)
+	require.NoError(t, p.Seek(mid))
+	var got []string
+	for p.Next() {
+		got = append(got, string(p.Record().Message))
+	}
+	require.NoError(t, p.Err())
+	assert.Equal(t, msgs[2:], got,
+		"the remaining lines of a straddled record must not become records")
+}
+
+func TestSeekOffsetsAreStreamAbsoluteAfterSeek(t *testing.T) {
+	// Record.Offset after a Seek must still be the position in the FILE,
+	// not the distance from the seek point. Otherwise a resumed scan would
+	// persist offsets that mean nothing on the next restart -- which is
+	// the bug that makes offset-based resumption drift.
+	data := fixture(t, "json/basic.json")
+	offs, _ := recordOffsets(t, data, Config{Format: FormatJSON})
+	require.Len(t, offs, 3)
+
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+	require.NoError(t, p.Seek(offs[1]))
+	require.True(t, p.Next())
+	assert.Equal(t, offs[1], p.Record().Offset)
+	require.True(t, p.Next())
+	assert.Equal(t, offs[2], p.Record().Offset)
+}
+
+func TestSeekToZeroReadsEverything(t *testing.T) {
+	data := fixture(t, "json/basic.json")
+	_, msgs := recordOffsets(t, data, Config{Format: FormatJSON})
+
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+	require.NoError(t, p.Seek(0))
+	var got []string
+	for p.Next() {
+		got = append(got, string(p.Record().Message))
+	}
+	require.NoError(t, p.Err())
+	assert.Equal(t, msgs, got)
+}
+
+func TestSeekPastEndIsClean(t *testing.T) {
+	data := fixture(t, "json/basic.json")
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+	require.NoError(t, p.Seek(int64(len(data))+1000))
+	assert.False(t, p.Next())
+	assert.NoError(t, p.Err())
+}
+
+func TestSeekOnANonSeekableReader(t *testing.T) {
+	// A pipe, a network connection or a decompressing reader cannot seek,
+	// and saying so plainly is more useful than reading and discarding
+	// gigabytes to simulate it.
+	p := New(&countingReader{r: strings.NewReader("{}\n")}, Config{Format: FormatJSON})
+	assert.ErrorIs(t, p.Seek(10), ErrNotSeekable)
+	assert.ErrorIs(t, p.Seek(-1), ErrNotSeekable)
+}
+
+func TestSeekKeepsDetectionState(t *testing.T) {
+	// Format and prefix belong to the FILE, not to a position in it.
+	// Re-detecting from the middle would be both wasteful and less
+	// reliable, since a mid-file sample may start with a continuation line.
+	data := fixture(t, "stderr/basic.log")
+	p := New(bytes.NewReader(data), Config{})
+	require.True(t, p.Next())
+	format, prefix := p.DetectedFormat(), p.DetectedPrefix()
+	require.Equal(t, FormatStderr, format)
+	require.NotEmpty(t, prefix)
+
+	require.NoError(t, p.Seek(int64(len(data)/2)))
+	assert.Equal(t, format, p.DetectedFormat())
+	assert.Equal(t, prefix, p.DetectedPrefix())
+}
