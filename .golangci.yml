@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - misspell
+    - revive
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # Field alignment is deliberately not enforced: Record's field order
+        # follows the specification's §4.2 listing so it can be reviewed
+        # against the spec line by line.
+        - fieldalignment
+    revive:
+      rules:
+        - name: exported
+          # CON-006 caps the exported surface at 40 identifiers and VAL-007
+          # requires a doc comment on every one of them.
+          severity: error
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
