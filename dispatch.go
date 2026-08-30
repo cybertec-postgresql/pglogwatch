@@ -35,18 +35,6 @@ func (p *Parser) ensureFormat() bool {
 	return true
 }
 
-// detectFormat inspects the buffered input and picks a destination.
-//
-// Interim behaviour: FMT-005's real detection -- a leading '{' means jsonlog,
-// an ISO-8601 timestamp followed by a comma at a valid column boundary means
-// csvlog, otherwise stderr -- arrives with detect.go in T085. Until then the
-// parser assumes stderr, which is PostgreSQL's default destination and the
-// safest thing to be wrong about, because its parser tolerates arbitrary lines
-// rather than rejecting them.
-func (p *Parser) detectFormat() (Format, bool) {
-	return FormatStderr, true
-}
-
 // splitRecord finds the end of the next record for the resolved format. It has
 // the shape of a bufio.SplitFunc; see splitFunc for the convention.
 func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
