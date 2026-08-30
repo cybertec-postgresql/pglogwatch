@@ -226,9 +226,12 @@ func (r *remoteReader) fetch() error {
 	r.pending = append(r.pending, chunk...)
 	r.curOff += int64(len(chunk))
 
-	// A short chunk means the file ended inside it.
+	// A short chunk means the file ended inside it, so the file is done.
+	// Marking it flushed without finishing it would send the reader back
+	// for another chunk past end of file -- one wasted round trip per file
+	// against a real server, and an unmatched expectation against a mock.
 	if int64(len(chunk)) < r.cfg.chunkSize() {
-		r.flush = true
+		r.finishFile()
 	}
 	return nil
 }
