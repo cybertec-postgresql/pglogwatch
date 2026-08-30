@@ -59,9 +59,7 @@ func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
 		// the whole story for this format.
 		return splitLine(data, atEOF, p.cfg.emitTruncatedTail())
 	default:
-		// stderr records absorb continuation lines, which needs a
-		// lookahead against the prefix template (T062).
-		return splitLine(data, atEOF, p.cfg.emitTruncatedTail())
+		return p.splitStderrRecord(data, atEOF)
 	}
 }
 

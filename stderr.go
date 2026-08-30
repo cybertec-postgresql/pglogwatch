@@ -409,3 +409,87 @@ func continuationField(label []byte) contField {
 	}
 	return contNone
 }
+
+// splitStderrRecord frames one stderr record, absorbing continuation lines.
+//
+// stderr has no record delimiter: a record ends where the next one begins. The
+// framer therefore has to look ahead at the following line and decide whether
+// it starts a new record, which is why this needs the compiled prefix while
+// csvlog's framer needs nothing.
+func (p *Parser) splitStderrRecord(data []byte, atEOF bool) (int, []byte, error) {
+	nl := indexNewline(data)
+	if nl < 0 {
+		if !atEOF {
+			return 0, nil, nil
+		}
+		line := trimCR(data)
+		if len(line) == 0 || !p.cfg.emitTruncatedTail() {
+			return len(data), nil, nil
+		}
+		return len(data), line, nil
+	}
+	if len(trimCR(data[:nl])) == 0 {
+		return nl + 1, nil, nil // a blank line is not a record
+	}
+
+	recEnd := nl
+	pos := nl + 1
+	for {
+		if pos >= len(data) {
+			if !atEOF {
+				return 0, nil, nil // need the next line to decide
+			}
+			break
+		}
+		i := indexNewline(data[pos:])
+		lineEnd := len(data)
+		if i >= 0 {
+			lineEnd = pos + i
+		} else if !atEOF {
+			return 0, nil, nil
+		}
+		if !p.isContinuationLine(trimCR(data[pos:lineEnd])) {
+			break
+		}
+		recEnd = lineEnd
+		if i < 0 {
+			pos = len(data)
+			break
+		}
+		pos = lineEnd + 1
+	}
+	return pos, trimCR(data[:recEnd]), nil
+}
+
+// isContinuationLine reports whether a line belongs to the record above it.
+func (p *Parser) isContinuationLine(line []byte) bool {
+	if len(line) == 0 {
+		return false
+	}
+	// E7: PostgreSQL indents the continuation lines of a wrapped statement
+	// instead of repeating the prefix. Nothing else in a log starts with
+	// whitespace, so this test is both cheap and unambiguous.
+	if isSpaceOrTab(line[0]) {
+		return true
+	}
+	if p.prefix == nil {
+		return false
+	}
+	rest, ok := p.prefix.scanPrefix(line, nil, &p.tz)
+	if !ok {
+		return true // no prefix: part of the record above
+	}
+	label, _, hasLabel := splitLabel(rest)
+	if !hasLabel {
+		return true
+	}
+	if continuationField(label) != contNone {
+		return !p.cfg.SplitContinuations
+	}
+	// A line that carries the prefix and a label that is not a
+	// continuation starts a new record -- even when the label is a
+	// severity this parser does not recognise. That is what keeps E13, a
+	// log read under the wrong MessagesLang, from collapsing into one
+	// enormous record.
+	return false
+}
