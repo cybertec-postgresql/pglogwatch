@@ -153,9 +153,14 @@ func WriteCSV(w io.Writer, events []Event, layout Layout) (Written, error) {
 		escapeCSV(&sb, e.Detail)
 		sb.WriteByte(',')
 		escapeCSV(&sb, e.Hint)
-		sb.WriteString(",,,") // internal_query, internal_query_pos, context
+		// Four separators, not three: one closes hint, and three leave
+		// internal_query, internal_query_pos and context empty, so that
+		// the statement lands in column 20 (query).
+		sb.WriteString(",,,,")
 		escapeCSV(&sb, e.Statement)
-		sb.WriteString(",,") // query_pos, location
+		// Three separators: closes query, then query_pos and location
+		// empty, so application_name is column 23.
+		sb.WriteString(",,,")
 		escapeCSV(&sb, e.App)
 
 		if layout >= LayoutPG13 {
