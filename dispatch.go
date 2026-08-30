@@ -54,10 +54,7 @@ func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
 	case FormatCSV:
 		return splitCSVRecord(data, atEOF, p.cfg.emitTruncatedTail())
 	case FormatJSON:
-		// jsonlog writes exactly one object per physical line and
-		// FMT-006 forbids multi-line assembly, so the line framer is
-		// the whole story for this format.
-		return splitLine(data, atEOF, p.cfg.emitTruncatedTail())
+		return splitJSONRecord(data, atEOF, p.cfg.emitTruncatedTail())
 	default:
 		return p.splitStderrRecord(data, atEOF)
 	}
