@@ -18,3 +18,144 @@ package pglogwatch
 func splitJSONRecord(data []byte, atEOF bool, emitTail bool) (int, []byte, error) {
 	return splitLine(data, atEOF, emitTail)
 }
+
+// jsonValue is one key's value as the scanner found it: the raw bytes, and
+// whether they still carry escapes.
+type jsonValue struct {
+	raw     []byte
+	str     bool // the value was a JSON string, so raw excludes the quotes
+	escaped bool // the string contains at least one backslash escape
+}
+
+// scanJSONObject walks a jsonlog object, calling visit for each key.
+//
+// No map, no reflection, no encoding/json (CON-004, PERF-005). The scanner
+// walks the object once and hands each key straight to the field dispatcher,
+// which is what makes a record cost zero allocations -- Unmarshal into a struct
+// allocates for every string field, and Decoder.Token allocates per token.
+//
+// It is a jsonlog scanner, not a general JSON parser: PostgreSQL writes a flat
+// object of strings and numbers, so nested objects and arrays are not handled.
+// Meeting one means the line is not jsonlog, and reporting it as malformed is
+// the right answer rather than a limitation.
+func scanJSONObject(rec []byte, visit func(key []byte, val jsonValue)) error {
+	i := skipJSONSpace(rec, 0)
+	if i >= len(rec) || rec[i] != '{' {
+		return errBadJSON
+	}
+	i = skipJSONSpace(rec, i+1)
+	if i < len(rec) && rec[i] == '}' {
+		return nil // an empty object is a valid, if unhelpful, record
+	}
+
+	for i < len(rec) {
+		if rec[i] != '"' {
+			return errBadJSON
+		}
+		key, next, ok := scanJSONString(rec, i)
+		if !ok {
+			return errBadJSON
+		}
+		i = skipJSONSpace(rec, next)
+		if i >= len(rec) || rec[i] != ':' {
+			return errBadJSON
+		}
+		i = skipJSONSpace(rec, i+1)
+
+		val, next, ok := scanJSONValue(rec, i)
+		if !ok {
+			return errBadJSON
+		}
+		visit(key.raw, val)
+		i = skipJSONSpace(rec, next)
+
+		if i >= len(rec) {
+			return errBadJSON // ran off the end without a closing brace
+		}
+		switch rec[i] {
+		case ',':
+			i = skipJSONSpace(rec, i+1)
+		case '}':
+			return nil
+		default:
+			return errBadJSON
+		}
+	}
+	return errBadJSON
+}
+
+func skipJSONSpace(b []byte, i int) int {
+	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\r' || b[i] == '\n') {
+		i++
+	}
+	return i
+}
+
+// scanJSONString reads a quoted string starting at b[i], returning its content
+// without the quotes and the index just past the closing quote.
+//
+// The escape handling is the part that has to be exactly right. A backslash
+// escapes the next character whatever it is, so the scan must step over pairs
+// rather than test bytes individually: a string ending in an escaped backslash
+// closes normally, while a string containing an escaped quote does not close
+// there. Getting either wrong shifts every following key by one and produces a
+// record that looks plausible and is wrong.
+func scanJSONString(b []byte, i int) (jsonValue, int, bool) {
+	i++ // the opening quote
+	start := i
+	escaped := false
+	for i < len(b) {
+		switch b[i] {
+		case '\\':
+			escaped = true
+			i += 2 // the backslash and whatever it escapes
+		case '"':
+			return jsonValue{raw: b[start:i], str: true, escaped: escaped}, i + 1, true
+		default:
+			i++
+		}
+	}
+	return jsonValue{}, 0, false
+}
+
+// scanJSONValue reads any value jsonlog can contain: a string, a number, or
+// null. Booleans are accepted for completeness.
+func scanJSONValue(b []byte, i int) (jsonValue, int, bool) {
+	if i >= len(b) {
+		return jsonValue{}, 0, false
+	}
+	switch b[i] {
+	case '"':
+		return scanJSONString(b, i)
+	case 'n':
+		if hasPrefix(b[i:], "null") {
+			// Absent, not the four-letter text: returning an empty
+			// value is what makes Record's zero-value convention
+			// hold for a key PostgreSQL wrote as null.
+			return jsonValue{}, i + 4, true
+		}
+	case 't':
+		if hasPrefix(b[i:], "true") {
+			return jsonValue{raw: b[i : i+4]}, i + 4, true
+		}
+	case 'f':
+		if hasPrefix(b[i:], "false") {
+			return jsonValue{raw: b[i : i+5]}, i + 5, true
+		}
+	}
+	// A number. jsonlog never writes a nested object or array, so anything
+	// else is not jsonlog and the caller should report it as malformed.
+	start := i
+	for i < len(b) {
+		c := b[i]
+		if isDigit(c) || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E' {
+			i++
+			continue
+		}
+		break
+	}
+	if i == start {
+		return jsonValue{}, 0, false
+	}
+	return jsonValue{raw: b[start:i]}, i, true
+}
