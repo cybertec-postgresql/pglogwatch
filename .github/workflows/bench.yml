@@ -1,0 +1,105 @@
+name: Benchmark regression gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchstat:
+    name: benchstat against the committed baseline
+    # PERF-030 gates on a 5 % change in ns/op. SVC-002 exists because shared
+    # runners have far more variance than that -- a gate on a shared runner
+    # fails on noise, gets ignored, and then gets deleted. This job therefore
+    # runs only on the pinned runner, and says so when there is not one.
+    runs-on: [self-hosted, pglogwatch-bench]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      # -count=10 because benchstat needs several samples to distinguish a
+      # regression from noise; a single run cannot support a 5 % threshold at
+      # any confidence.
+      - name: Benchmark this revision
+        run: |
+          go test -run '^$' -bench . -benchmem -count=10 ./... \
+            | tee /tmp/new.txt
+
+      - name: Compare against the committed baseline
+        id: compare
+        run: |
+          if [ ! -f bench/baseline.txt ]; then
+            echo "No committed baseline. Establishing one from this run:"
+            cp /tmp/new.txt bench/baseline.txt
+            echo "status=baseline-created" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          benchstat bench/baseline.txt /tmp/new.txt | tee /tmp/delta.txt
+          echo "status=compared" >> "$GITHUB_OUTPUT"
+
+      # Two separate failures, because they mean different things. A slower
+      # benchmark may be an acceptable trade; a NEW ALLOCATION is a breach of
+      # PERF-001 and is never acceptable, so it is checked first and reported
+      # on its own.
+      - name: Fail on any new allocation (PERF-001, PERF-030)
+        if: steps.compare.outputs.status == 'compared'
+        run: |
+          if grep -E 'allocs/op' /tmp/delta.txt | grep -qE '\+[0-9]'; then
+            echo "::error::a benchmark gained allocations; PERF-001 requires zero per record"
+            grep -E 'allocs/op' /tmp/delta.txt
+            exit 1
+          fi
+
+      - name: Fail on a throughput regression over 5 % (PERF-030)
+        if: steps.compare.outputs.status == 'compared'
+        run: |
+          # benchstat prints a percentage delta per benchmark. Anything worse
+          # than +5 % in ns/op fails.
+          awk '
+            /sec\/op|ns\/op/ && match($0, /\+([0-9]+\.[0-9]+)%/, m) {
+              if (m[1] > 5.0) { print "REGRESSION: " $0; bad = 1 }
+            }
+            END { exit bad }
+          ' /tmp/delta.txt || {
+            echo "::error::a benchmark regressed by more than 5 % in ns/op (PERF-030)"
+            exit 1
+          }
+
+      - name: Upload the comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchstat
+          path: |
+            /tmp/new.txt
+            /tmp/delta.txt
+          if-no-files-found: ignore
+
+  unavailable:
+    name: note when the pinned runner is absent
+    # Without this, a repository with no self-hosted runner shows the gate as
+    # "queued" forever and a reviewer reads that as "not finished" rather than
+    # "never ran". VAL-004 does not allow a threshold to be assumed met.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain
+        run: |
+          echo "PERF-030's regression gate runs only on the pinned benchmark"
+          echo "runner (INF-002, SVC-002). If that job did not run, this change"
+          echo "has NOT been checked for a performance regression, and no"
+          echo "threshold may be reported as met (VAL-004)."
