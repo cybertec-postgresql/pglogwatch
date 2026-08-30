@@ -319,33 +319,141 @@ func splitLabel(rest []byte) (label, msg []byte, ok bool) {
 	return label, msg, true
 }
 
-// parseStderrInto fills a Record from one framed stderr record.
+// parseStderrInto fills a Record from one framed stderr record, which may span
+// several physical lines.
+//
+// The first line carries the prefix, the severity and the message. Every
+// following line is either a labelled continuation, which opens a new field,
+// or a wrapped line, which extends whichever field is currently open.
+//
+// Extending a field costs nothing because the lines are contiguous in the read
+// buffer: the field is simply re-sliced to end further along the same record.
+// That is what keeps a multi-line record inside PERF-001 -- appending into a
+// scratch buffer would allocate for every wrapped statement in the log.
+//
+// The whole function works in OFFSETS into rec rather than in slices. Slice
+// arithmetic on nested sub-slices is how the first version of this got a panic
+// out of a perfectly ordinary fixture, and COR-002 does not allow panics.
 func (p *Parser) parseStderrInto(rec []byte) error {
 	r := &p.rec
 
-	rest, ok := p.prefixOrNil().scanPrefixOrAll(rec, r, &p.tz)
-	if !ok {
-		// The line matches no prefix at all. It is still a line of the
-		// log, so it is emitted with its text as the message rather
-		// than discarded (COR-001).
-		r.Message = rec
-		return nil
+	fieldStart, fieldEnd := 0, 0
+	open := &r.Message
+	first := true
+
+	for start, end := range physicalLines(rec) {
+		line := rec[start:end]
+
+		if first {
+			first = false
+			rest, matched := p.prefixOrNil().scanPrefixOrAll(line, r, &p.tz)
+			if !matched {
+				// Matches no prefix at all, but it is still a
+				// line of the log: emit it with its text as the
+				// message rather than discard it (COR-001).
+				r.Message = rec
+				return nil
+			}
+			fieldStart, fieldEnd = end-len(rest), end
+			if label, msg, hasLabel := splitLabel(rest); hasLabel {
+				// RawSeverity is set whether or not the label
+				// resolves, so E13 -- the right log read under
+				// the wrong MessagesLang -- still hands the
+				// caller the original bytes.
+				r.RawSeverity = label
+				r.Severity = p.sev.resolve(label)
+				fieldStart = end - len(msg)
+				if field := continuationField(label); field != contNone {
+					// Reachable only with
+					// SplitContinuations, where a
+					// continuation is its own record.
+					open = p.continuationTarget(field)
+				}
+			}
+			*open = rec[fieldStart:fieldEnd]
+			continue
+		}
+
+		r.Flags |= FlagMultiline
+		if label, msg, ok := p.labelledContinuation(line); ok {
+			open = p.continuationTarget(continuationField(label))
+			fieldStart = end - len(msg)
+		}
+		fieldEnd = end
+		*open = rec[fieldStart:fieldEnd]
 	}
 
-	label, msg, hasLabel := splitLabel(rest)
-	if !hasLabel {
-		r.Message = rest
-		return nil
+	if len(r.Statement) > 0 {
+		r.Flags |= FlagHasStatement
 	}
-
-	// RawSeverity is set whether or not the label resolves, so that E13 --
-	// the right log parsed under the wrong MessagesLang -- still hands the
-	// caller the original bytes to work with.
-	r.RawSeverity = label
-	r.Severity = p.sev.resolve(label)
-	r.Message = msg
 	p.scanRecordDuration()
 	return nil
+}
+
+// physicalLines iterates the record's lines as (start, end) offsets, with end
+// excluding the newline and any carriage return before it (COR-006).
+func physicalLines(rec []byte) func(func(int, int) bool) {
+	return func(yield func(int, int) bool) {
+		pos := 0
+		for {
+			end := len(rec)
+			next := -1
+			if i := indexNewline(rec[pos:]); i >= 0 {
+				end = pos + i
+				next = end + 1
+			}
+			e := end
+			if e > pos && rec[e-1] == '' {
+				e--
+			}
+			if !yield(pos, e) || next < 0 {
+				return
+			}
+			pos = next
+		}
+	}
+}
+
+// labelledContinuation reports whether a continuation line carries a
+// DETAIL/HINT/STATEMENT/QUERY/CONTEXT label, and returns the label and the
+// text after it.
+func (p *Parser) labelledContinuation(line []byte) (label, msg []byte, ok bool) {
+	if len(line) == 0 || isSpaceOrTab(line[0]) {
+		return nil, nil, false
+	}
+	rest, matched := p.prefixOrNil().scanPrefixOrAll(line, nil, &p.tz)
+	if !matched {
+		return nil, nil, false
+	}
+	label, msg, hasLabel := splitLabel(rest)
+	if !hasLabel || continuationField(label) == contNone {
+		return nil, nil, false
+	}
+	return label, msg, true
+}
+
+// continuationTarget returns the Record field a continuation label fills.
+//
+// The mapping to csvlog's columns is deliberate, so that the same server
+// activity logged either way produces equal records (COR-004): stderr's
+// STATEMENT is csvlog's query column, and stderr's QUERY -- the internal query
+// of a failing PL/pgSQL statement -- is csvlog's internal_query.
+func (p *Parser) continuationTarget(field contField) *[]byte {
+	r := &p.rec
+	switch field {
+	case contDetail:
+		return &r.Detail
+	case contHint:
+		return &r.Hint
+	case contStatement:
+		r.Query = nil
+		return &r.Statement
+	case contQuery:
+		return &r.InternalQuery
+	case contContext:
+		return &r.Context
+	}
+	return &r.Message
 }
 
 // scanRecordDuration fills Duration from the message, shared by every format
