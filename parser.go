@@ -55,6 +55,15 @@ type Parser struct {
 	// land here (IFC-003).
 	err error
 
+	// detectRec is a scratch Record used only while scoring candidate
+	// prefixes, so plausibility checking never allocates and never touches
+	// the record the caller sees.
+	detectRec Record
+
+	// ready records that format and prefix detection have run, so the
+	// check at the top of Next is one boolean rather than repeated work.
+	ready bool
+
 	// done latches at end of input so that Next keeps returning false
 	// without side effects (IFC-001).
 	done bool

@@ -14,14 +14,24 @@ package pglogwatch
 // ensureFormat resolves FormatAuto before the first record is read. It reports
 // false if the stream ended before a format could be chosen.
 func (p *Parser) ensureFormat() bool {
-	if p.format != FormatAuto {
+	if p.ready {
 		return true
 	}
-	f, ok := p.detectFormat()
-	if !ok {
-		return false
+	if p.format == FormatAuto {
+		f, ok := p.detectFormat()
+		if !ok {
+			return false
+		}
+		p.format = f
 	}
-	p.format = f
+	// stderr needs a prefix before anything can be framed, let alone
+	// parsed, so detection happens here rather than lazily per record
+	// (FMT-004).
+	if p.format == FormatStderr && p.prefix == nil {
+		p.prefix = p.detectPrefix()
+		p.detectedPrefix = p.prefix.String()
+	}
+	p.ready = true
 	return true
 }
 
@@ -82,6 +92,13 @@ func (p *Parser) parseUnstructured(rec []byte) error {
 // its own state here as it is implemented.
 func (p *Parser) resetFormatState() {
 	p.scratch = p.scratch[:0]
+	p.ready = false
+	if p.cfg.LinePrefix == "" {
+		// A detected prefix belongs to the stream it was detected from.
+		// A configured one is the caller's and survives.
+		p.prefix = nil
+		p.detectedPrefix = ""
+	}
 }
 
 // splitLine frames one newline-terminated line, dropping the newline and any

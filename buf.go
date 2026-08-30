@@ -209,3 +209,26 @@ func (b *buf) grow() bool {
 // this is the hottest scan in the package -- every physical line of every log
 // passes through it. A hand-written loop here would be several times slower.
 func indexNewline(b []byte) int { return bytes.IndexByte(b, '\n') }
+
+// peek returns the buffered data without consuming it, reading more until it
+// holds at least want bytes or the stream ends.
+//
+// It exists for log_line_prefix detection (FMT-004), which has to look at the
+// first lines of the stream before it can parse any of them. Consuming them
+// and replaying would mean holding records the parser is not ready to emit;
+// peeking keeps the read position where it is, so detection is invisible to
+// Record.Offset and to Stats.Bytes.
+//
+// The returned slice is invalidated by any later call that grows or compacts
+// the buffer, which is the same contract records have.
+func (b *buf) peek(want int) []byte {
+	if want > b.max {
+		want = b.max
+	}
+	for b.w-b.r < want && !b.atEOF {
+		if !b.fill() {
+			b.atEOF = true
+		}
+	}
+	return b.data[b.r:b.w]
+}

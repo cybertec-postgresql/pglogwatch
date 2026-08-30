@@ -372,3 +372,40 @@ func (t *prefixTemplate) scanPrefixOrAll(line []byte, r *Record, tz *tzCache) ([
 	}
 	return t.scanPrefix(line, r, tz)
 }
+
+// contField names the Record field a continuation label populates.
+type contField uint8
+
+const (
+	contNone contField = iota
+	contDetail
+	contHint
+	contStatement
+	contQuery
+	contContext
+)
+
+// continuationField maps a PostgreSQL continuation label to the field it
+// belongs in.
+//
+// These are not severities. PostgreSQL writes them in the same position, which
+// is why a parser that treats the token before the colon as a severity ends up
+// counting DETAIL and HINT as log events (FMT-006).
+//
+// The labels are NOT localised by lc_messages -- PostgreSQL emits them in
+// English regardless -- so unlike severities they need no locale table.
+func continuationField(label []byte) contField {
+	switch string(label) {
+	case "DETAIL":
+		return contDetail
+	case "HINT":
+		return contHint
+	case "STATEMENT":
+		return contStatement
+	case "QUERY":
+		return contQuery
+	case "CONTEXT":
+		return contContext
+	}
+	return contNone
+}
