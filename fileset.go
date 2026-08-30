@@ -3,6 +3,7 @@ package pglogwatch
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -54,6 +55,40 @@ type FileSet struct {
 	// Format selects the default Glob. It does not affect parsing, which is
 	// the Parser's business; a FileSet only decides which files to open.
 	Format Format
+
+	// mu guards ids, which readers update as they open files.
+	mu sync.Mutex
+
+	// ids remembers which file each path referred to when it was last read.
+	//
+	// A stored offset is only meaningful for the file it was taken from,
+	// and a path is not a file: rotation can replace the file behind a name
+	// while the name stays put. Comparing identities is what makes that
+	// detectable when the size test cannot see it (COR-007).
+	ids map[string]fileIdentity
+}
+
+// rememberIdentity records which file a path referred to.
+func (fs *FileSet) rememberIdentity(path string, id fileIdentity) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.ids == nil {
+		fs.ids = make(map[string]fileIdentity)
+	}
+	fs.ids[path] = id
+}
+
+// isSameFileAsLastTime reports whether a path still refers to the file it did
+// when it was last read. An unknown path counts as the same, since there is
+// nothing to contradict.
+func (fs *FileSet) isSameFileAsLastTime(path string, id fileIdentity) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	prev, ok := fs.ids[path]
+	if !ok {
+		return true
+	}
+	return prev.sameFile(id)
 }
 
 // Open returns a reader over the file set.

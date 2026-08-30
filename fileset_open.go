@@ -136,6 +136,15 @@ func (r *fileSetReader) fill() bool {
 	// End of this file. When following, the last file stays open: more may
 	// be appended to it. Any earlier file is finished.
 	if r.fs.Follow && r.isNewestFile() {
+		if r.currentFileWasReplaced() {
+			// Rotated out from under us. Reopening from the start
+			// is what picks up the new file's contents; continuing
+			// on the old handle would read a file nothing writes to
+			// any more (COR-007).
+			r.closeCurrent()
+			delete(r.done, r.curPath)
+			return true
+		}
 		return r.wait()
 	}
 	r.closeCurrent()
@@ -162,13 +171,28 @@ func (r *fileSetReader) openNext() bool {
 		if err != nil {
 			continue // vanished between the glob and the stat
 		}
-		if offset > 0 && id.size <= offset {
+		// Rotation detection, COR-007, in two independent tests because
+		// neither one catches both cases:
+		//
+		//  1. the file SHRANK. log_truncate_on_rotation emptied it and
+		//     the server is writing to it again under the same name, so
+		//     the stored offset points past the end of a file that no
+		//     longer exists (E15).
+		//  2. the file was REPLACED. A rotation that renames the old
+		//     file and creates a new one leaves a different file behind
+		//     the same name -- and if the new file has already grown
+		//     past the old offset, its size proves nothing. Only the
+		//     file identity does.
+		//
+		// Missing either one silently skips everything before the
+		// stored offset in the new file.
+		if !r.fs.isSameFileAsLastTime(path, id) {
+			offset = 0
+			delete(r.done, path)
+		} else if offset > 0 && id.size <= offset {
 			if id.size == offset {
 				continue // nothing new since last time
 			}
-			// The file shrank: truncated and reused under the same
-			// name, so the stored offset belongs to a file that no
-			// longer exists (E15).
 			offset = 0
 		}
 		f, err := openFileAt(path, offset)
@@ -181,6 +205,7 @@ func (r *fileSetReader) openNext() bool {
 			continue
 		}
 		r.cur, r.curPath, r.curID, r.curPos = f, path, id, pos
+		r.fs.rememberIdentity(path, id)
 		return true
 	}
 	return false
@@ -195,6 +220,22 @@ func (r *fileSetReader) isNewestFile() bool {
 	}
 	slices.Sort(paths)
 	return paths[len(paths)-1] == r.curPath
+}
+
+// currentFileWasReplaced reports whether the path the open file came from now
+// refers to a different file.
+//
+// Checked only at end of file, which is where a follower spends its idle time,
+// so rotation is noticed within one poll interval and costs one stat.
+func (r *fileSetReader) currentFileWasReplaced() bool {
+	if r.curPath == "" {
+		return false
+	}
+	id, err := identify(r.curPath)
+	if err != nil {
+		return true // the file is gone; whatever comes back is not it
+	}
+	return !r.curID.sameFile(id)
 }
 
 // closeCurrent finishes with the open file.

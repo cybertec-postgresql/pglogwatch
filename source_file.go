@@ -1,6 +1,7 @@
 package pglogwatch
 
 import (
+	"bytes"
 	"io"
 	"os"
 )
@@ -49,30 +50,69 @@ func openFileAt(path string, offset int64) (*os.File, error) {
 	return f, nil
 }
 
+// fingerprintBytes is how much of a file's head is used to identify it.
+//
+// One PostgreSQL log line is comfortably shorter than this and begins with a
+// timestamp, so two different log files agreeing over this many bytes is not a
+// case that occurs.
+const fingerprintBytes = 256
+
 // fileIdentity distinguishes one file from another with the same name.
 //
-// A rotation that reuses a filename produces a different file with identical
-// path, and COR-007 requires that not to be mistaken for the same one. Size is
-// the portable half of the test; os.SameFile supplies the inode or file-index
-// comparison on every platform Go supports, including Windows, which is why
-// this is expressed as a stat rather than as a Unix-specific syscall (PKG-005).
+// COR-007 requires a rotation that reuses a filename not to be mistaken for
+// the same file. The obvious test is os.SameFile, which compares inodes on
+// Unix and file indices on Windows -- and it is NOT sufficient. Measured on
+// windows/amd64: deleting a file and recreating it under the same name yields
+// two FileInfos that os.SameFile reports as identical, because NTFS reuses the
+// file index. A test that trusted it would silently skip the new file's
+// contents on exactly the platform PKG-005 requires support for.
+//
+// So identity is also the first fingerprintBytes of content. A file being
+// APPENDED to keeps its head, while a truncated or replaced file does not,
+// which distinguishes the two cases that matter without depending on
+// filesystem semantics at all.
 type fileIdentity struct {
-	info os.FileInfo
-	size int64
+	info    os.FileInfo
+	size    int64
+	head    [fingerprintBytes]byte
+	headLen int
 }
 
 func identify(path string) (fileIdentity, error) {
-	info, err := os.Stat(path)
+	f, err := os.Open(path) //nolint:gosec // the caller named the file
 	if err != nil {
 		return fileIdentity{}, err
 	}
-	return fileIdentity{info: info, size: info.Size()}, nil
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return fileIdentity{}, err
+	}
+	id := fileIdentity{info: info, size: info.Size()}
+	n, err := io.ReadFull(f, id.head[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return fileIdentity{}, err
+	}
+	id.headLen = n
+	return id, nil
 }
 
 // sameFile reports whether two identities describe the same file.
+//
+// The heads are compared over their COMMON prefix, so a file that has grown
+// since it was last seen still matches: appending changes the length, never
+// the beginning. Differing content within that prefix means a different file,
+// whatever the filesystem reports.
 func (id fileIdentity) sameFile(other fileIdentity) bool {
 	if id.info == nil || other.info == nil {
 		return false
 	}
+	n := min(id.headLen, other.headLen)
+	if !bytes.Equal(id.head[:n], other.head[:n]) {
+		return false
+	}
+	// On Unix this still adds precision: two files can begin identically
+	// and be different files, and the inode says so.
 	return os.SameFile(id.info, other.info)
 }
