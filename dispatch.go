@@ -42,9 +42,7 @@ func (p *Parser) detectFormat() (Format, bool) {
 func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
 	switch p.format {
 	case FormatCSV:
-		// csvlog records end at a newline that is not inside a quoted
-		// field, so the framer must track quoting (T039).
-		return splitLine(data, atEOF, p.cfg.emitTruncatedTail())
+		return splitCSVRecord(data, atEOF, p.cfg.emitTruncatedTail())
 	case FormatJSON:
 		// jsonlog writes exactly one object per physical line and
 		// FMT-006 forbids multi-line assembly, so the line framer is
