@@ -384,6 +384,9 @@ func (p *Parser) parseStderrInto(rec []byte) error {
 	}
 
 	if len(r.Statement) > 0 {
+		// Keep Query and Statement in step with the csvlog path, where
+		// both come from the query column (COR-004).
+		r.Query = r.Statement
 		r.Flags |= FlagHasStatement
 	}
 	p.scanRecordDuration()
@@ -403,7 +406,7 @@ func physicalLines(rec []byte) func(func(int, int) bool) {
 				next = end + 1
 			}
 			e := end
-			if e > pos && rec[e-1] == '' {
+			if e > pos && rec[e-1] == '\r' {
 				e--
 			}
 			if !yield(pos, e) || next < 0 {
@@ -446,7 +449,13 @@ func (p *Parser) continuationTarget(field contField) *[]byte {
 	case contHint:
 		return &r.Hint
 	case contStatement:
-		r.Query = nil
+		// csvlog puts the statement in its query column and this
+		// package mirrors it into both Query and Statement, so stderr
+		// must fill both too. Filling only one would make the same
+		// server activity produce different records depending on which
+		// destination was configured, which is exactly what COR-004
+		// forbids. Query is re-pointed after the field is written; see
+		// mirrorStatement.
 		return &r.Statement
 	case contQuery:
 		return &r.InternalQuery

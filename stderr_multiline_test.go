@@ -144,3 +144,21 @@ func TestStderrWrappedMessage(t *testing.T) {
 	require.NoError(t, p.Err())
 	assert.Zero(t, p.Stats().Malformed)
 }
+
+// TestStderrStatementMirrorsQuery pins COR-004 on the one field where stderr
+// and csvlog use different names for the same thing.
+//
+// csvlog has a "query" column holding the statement a record is about, and the
+// csvlog path fills both Query and Statement from it. stderr writes the same
+// thing as STATEMENT:. If only one field were filled here, the same server
+// activity would produce different records depending on which destination the
+// server happened to be configured for -- and a consumer reading Query would
+// silently see nothing on stderr logs.
+func TestStderrStatementMirrorsQuery(t *testing.T) {
+	recs, _ := parseFixture(t, "stderr/multiline.log",
+		Config{Format: FormatStderr, LinePrefix: multilinePrefix})
+	require.Len(t, recs, 2)
+	assert.NotEmpty(t, recs[0].Statement)
+	assert.Equal(t, string(recs[0].Statement), string(recs[0].Query),
+		"Query and Statement must agree, as they do on the csvlog path")
+}
