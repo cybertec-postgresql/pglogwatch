@@ -26,6 +26,10 @@ type Parser struct {
 	tz  tzCache
 	sev severityResolver
 
+	// detectedPrefix records the log_line_prefix in force for stderr
+	// input, whether it was configured or inferred (FMT-004).
+	detectedPrefix string
+
 	// format is the resolved destination: cfg.Format unless that is
 	// FormatAuto, in which case detection fills it in from the first
 	// non-empty line (FMT-005).
