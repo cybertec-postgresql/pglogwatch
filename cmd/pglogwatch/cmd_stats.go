@@ -38,28 +38,46 @@ var severityOrder = []pglogwatch.Severity{
 // Counting is O(1) in memory -- fixed arrays, no per-message state -- so it is
 // the report that can run over any size of log (PERF-026).
 func runStats(o *options) error {
-	var (
+	// One accumulator per worker, indexed by worker number, so counting
+	// needs no lock even with --jobs (IFC-008). They are summed after the
+	// scan; addition is associative, so the result does not depend on the
+	// order the workers finished in.
+	type acc struct {
 		bySeverity [16]int64
 		byKind     [16]int64
 		total      int64
 		unknown    int64
-	)
+		_          [64]byte // pad to keep neighbouring workers off one cache line
+	}
+	accs := make([]acc, o.workerCount()+1)
 
-	err := o.eachRecord(func(r *pglogwatch.Record) error {
-		total++
-		if int(r.Severity) < len(bySeverity) {
-			bySeverity[r.Severity]++
+	_, err := o.eachRecordByWorker(func(w int, r *pglogwatch.Record) error {
+		a := &accs[w]
+		a.total++
+		if int(r.Severity) < len(a.bySeverity) {
+			a.bySeverity[r.Severity]++
 		}
 		if r.Severity == pglogwatch.SeverityUnknown {
-			unknown++
+			a.unknown++
 		}
-		if k := classify(r); int(k) < len(byKind) {
-			byKind[k]++
+		if k := classify(r); int(k) < len(a.byKind) {
+			a.byKind[k]++
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+
+	var bySeverity, byKind [16]int64
+	var total, unknown int64
+	for i := range accs {
+		total += accs[i].total
+		unknown += accs[i].unknown
+		for k := range bySeverity {
+			bySeverity[k] += accs[i].bySeverity[k]
+			byKind[k] += accs[i].byKind[k]
+		}
 	}
 
 	if o.jsonOut {

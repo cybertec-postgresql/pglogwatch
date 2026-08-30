@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,4 +102,82 @@ func TestFormatOverrideIsHonoured(t *testing.T) {
 	require.Equal(t, exitOK, code)
 	assert.NotContains(t, out, "ERROR       3",
 		"jsonlog read as csvlog must not parse correctly")
+}
+
+func TestJobsProducesTheSameCountsAsSerial(t *testing.T) {
+	// --jobs must change how fast a report is produced, never what it says.
+	// ParallelScan does not preserve order (IFC-008), so a report that
+	// depended on order would silently differ here.
+	dir := t.TempDir()
+	var paths []string
+	for i := range 4 {
+		p := filepath.Join(dir, "log-"+itoaTest(i)+".json")
+		require.NoError(t, os.WriteFile(p, []byte(strings.Repeat(sampleLog, 50)), 0o600))
+		paths = append(paths, p)
+	}
+
+	serial := append([]string{"stats", "--jobs", "1"}, paths...)
+	parallel := append([]string{"stats", "--jobs", "8"}, paths...)
+
+	code1, out1, err1 := cliWith(t, "", serial...)
+	require.Equal(t, exitOK, code1, "stderr: %s", err1)
+	code2, out2, err2 := cliWith(t, "", parallel...)
+	require.Equal(t, exitOK, code2, "stderr: %s", err2)
+
+	assert.Equal(t, out1, out2,
+		"--jobs must not change the report, only how fast it is produced")
+	assert.Contains(t, out1, "ERROR")
+}
+
+func TestCompressedInputIsReadTransparently(t *testing.T) {
+	// A rotated log is usually compressed, and reading it should need no
+	// flag and no thought (PKG-004).
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "postgresql.json")
+	gz := filepath.Join(dir, "postgresql.json.gz")
+	require.NoError(t, os.WriteFile(plain, []byte(sampleLog), 0o600))
+
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	_, err := w.Write([]byte(sampleLog))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, os.WriteFile(gz, buf.Bytes(), 0o600))
+
+	_, fromPlain, _ := cliWith(t, "", "stats", plain)
+	code, fromGz, errOut := cliWith(t, "", "stats", gz)
+	require.Equal(t, exitOK, code, "stderr: %s", errOut)
+	assert.Equal(t, fromPlain, fromGz,
+		"a compressed log must produce the same report as its plain original")
+}
+
+func TestJobsFallsBackForCompressedInput(t *testing.T) {
+	// A compressed stream has no random access, so it cannot be sharded.
+	// Asking for --jobs must read it serially rather than fail.
+	dir := t.TempDir()
+	gz := filepath.Join(dir, "postgresql.json.gz")
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	_, err := w.Write([]byte(sampleLog))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, os.WriteFile(gz, buf.Bytes(), 0o600))
+
+	code, out, errOut := cliWith(t, "", "stats", "--jobs", "8", gz)
+	require.Equal(t, exitOK, code, "stderr: %s", errOut)
+	assert.Contains(t, out, "ERROR")
+}
+
+func itoaTest(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b [20]byte
+	p := len(b)
+	for i > 0 {
+		p--
+		b[p] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(b[p:])
 }
