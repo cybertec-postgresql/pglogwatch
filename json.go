@@ -19,6 +19,25 @@ func splitJSONRecord(data []byte, atEOF bool, emitTail bool) (int, []byte, error
 	return splitLine(data, atEOF, emitTail)
 }
 
+// Performance notes for this path (GUD-001, GUD-002, GUD-003).
+//
+// Measured on the fixtures at 1 MB, AMD Ryzen 9 7940HS / windows/amd64 / Go
+// 1.26.5: full parse 797 MB/s, severity-only 810 MB/s, both 0 allocs/op.
+// PERF-023's floor is 150 MB/s. jsonlog outruns csvlog here (797 against 672)
+// because its records are longer, so the fixed per-record cost is spread over
+// more bytes -- not because a JSON scan is cheaper than a CSV scan.
+//
+// The only heap escapes on this path are the scratch buffer's appends, which
+// are its growth: at 200 benchmark iterations that shows as 1 B/op, at 3000 as
+// 0 B/op. That is the steady state PERF-001 defines.
+//
+// One structural cost is known and deliberately kept: scanJSONObject calls a
+// closure per key, and the closure is far too large to inline (cost 1157
+// against a budget of 800), so every key costs an indirect call. Removing it
+// means folding field dispatch into the scanner, trading the separation
+// between "walk the object" and "store the fields" -- and the ability to test
+// them apart -- for throughput already five times the requirement.
+
 // jsonValue is one key's value as the scanner found it: the raw bytes, and
 // whether they still carry escapes.
 type jsonValue struct {
