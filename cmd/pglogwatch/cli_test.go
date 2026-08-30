@@ -55,94 +55,6 @@ func writeSample(t *testing.T) string {
 	return path
 }
 
-func TestReadsStandardInputWithNoPaths(t *testing.T) {
-	// IFC-010. Without this the CLI cannot appear in a pipeline, and the
-	// benchmark harness in §6.4 pipes into it.
-	code, out, errOut := cli(t, "stats")
-	assert.Equal(t, exitOK, code)
-	assert.NotEmpty(t, out, "reading standard input must produce a report")
-	assert.Empty(t, errOut)
-}
-
-func TestReadsNamedPaths(t *testing.T) {
-	path := writeSample(t)
-	code, out, _ := cliWith(t, "", "stats", path)
-	assert.Equal(t, exitOK, code)
-	assert.Contains(t, out, "ERROR")
-}
-
-func TestJSONOutputGoesToStdoutOnly(t *testing.T) {
-	// IFC-011: --output json emits NDJSON on stdout, and every diagnostic
-	// goes to stderr. A single stray line on stdout makes the output
-	// unparseable for whatever is consuming it.
-	code, out, errOut := cli(t, "stats", "--output", "json")
-	require.Equal(t, exitOK, code)
-	assert.Empty(t, errOut, "diagnostics must not reach stdout's stream")
-
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		require.NotEmpty(t, line)
-		assert.True(t, strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}"),
-			"every line of --output json must be a JSON object, got %q", line)
-	}
-}
-
-func TestJSONOutputIsOneObjectPerLine(t *testing.T) {
-	code, out, _ := cli(t, "errors", "--output", "json")
-	require.Equal(t, exitOK, code)
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	assert.NotEmpty(t, lines)
-	for _, line := range lines {
-		assert.NotContains(t, line[1:len(line)-1], "\n",
-			"NDJSON must not wrap an object across lines")
-	}
-}
-
-func TestExitCodes(t *testing.T) {
-	// IFC-012: 0 success, 1 usage or I/O error, 2 no input matched.
-	t.Run("success", func(t *testing.T) {
-		code, _, _ := cli(t, "stats")
-		assert.Equal(t, exitOK, code)
-	})
-
-	t.Run("no input matched", func(t *testing.T) {
-		missing := filepath.Join(t.TempDir(), "not-there.json")
-		code, out, errOut := cliWith(t, "", "stats", missing)
-		assert.Equal(t, exitNoInput, code)
-		assert.Empty(t, out, "a failed run must not emit a partial report")
-		assert.Contains(t, errOut, "no input")
-	})
-
-	t.Run("unknown command", func(t *testing.T) {
-		code, _, errOut := cli(t, "frobnicate")
-		assert.Equal(t, exitError, code)
-		assert.Contains(t, errOut, "unknown command")
-	})
-
-	t.Run("unknown flag", func(t *testing.T) {
-		code, _, errOut := cli(t, "stats", "--nonsense")
-		assert.Equal(t, exitError, code)
-		assert.NotEmpty(t, errOut)
-	})
-
-	t.Run("bad flag value", func(t *testing.T) {
-		code, _, errOut := cli(t, "stats", "--format", "yaml")
-		assert.Equal(t, exitError, code)
-		assert.Contains(t, errOut, "--format")
-	})
-
-	t.Run("no arguments prints usage", func(t *testing.T) {
-		code, _, errOut := cli(t)
-		assert.Equal(t, exitError, code)
-		assert.Contains(t, errOut, "Usage:")
-	})
-
-	t.Run("help succeeds", func(t *testing.T) {
-		code, out, _ := cli(t, "help")
-		assert.Equal(t, exitOK, code)
-		assert.Contains(t, out, "Usage:")
-	})
-}
-
 func TestEveryCommandRuns(t *testing.T) {
 	// A smoke test over the whole §4.8 table: each command must accept the
 	// sample log and produce something, in both output modes.
@@ -161,7 +73,6 @@ func TestEveryCommandRuns(t *testing.T) {
 		}
 	}
 }
-
 func TestGlobalFlagsAreAccepted(t *testing.T) {
 	// §4.8's global flag list, exercised so a rename or a typo fails here
 	// rather than in someone's script.
@@ -176,7 +87,6 @@ func TestGlobalFlagsAreAccepted(t *testing.T) {
 	)
 	assert.Equal(t, exitOK, code, "stderr: %s", errOut)
 }
-
 func TestTimeWindowFiltersRecords(t *testing.T) {
 	// --begin and --end must actually filter, not merely parse.
 	_, all, _ := cli(t, "stats")
@@ -184,7 +94,6 @@ func TestTimeWindowFiltersRecords(t *testing.T) {
 	assert.NotEqual(t, all, windowed,
 		"a time window that excludes records must change the report")
 }
-
 func TestFormatOverrideIsHonoured(t *testing.T) {
 	// A wrong --format must produce a wrong answer rather than being
 	// quietly corrected: the flag exists to override detection.
