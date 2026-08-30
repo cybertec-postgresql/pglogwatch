@@ -155,6 +155,14 @@ func scanShard(ctx context.Context, p *Parser, s shard, worker int,
 	return p.Err()
 }
 
+// minShardBytes is the smallest slice worth giving a worker.
+//
+// Below this, the per-shard cost -- opening a section reader, resolving the
+// format, resynchronising to a record boundary -- outweighs the parsing saved,
+// and splitting a small file many ways mostly produces empty shards. A file
+// under this size goes to one worker whole.
+const minShardBytes = 64 << 10
+
 // planShards divides the sources into work.
 //
 // A source whose size cannot be determined is not split: without a length
@@ -171,9 +179,24 @@ func planShards(srcs []io.ReaderAt, workers int) []shard {
 		if size == 0 {
 			continue
 		}
-		// One shard per source for now; byte-range splitting within a
-		// source arrives in T107.
-		shards = append(shards, shard{src: src, size: size, start: 0, end: -1})
+		// Split the source into byte ranges. Each range is snapped to a
+		// record boundary by the worker that reads it, so the cut
+		// points here can be arbitrary.
+		parts := int(size / minShardBytes)
+		parts = min(max(parts, 1), workers)
+
+		per := size / int64(parts)
+		for i := range parts {
+			start := int64(i) * per
+			end := start + per
+			if i == parts-1 {
+				// The last shard runs to the end of the source, so
+				// integer division leaving a remainder cannot
+				// strand the final bytes.
+				end = -1
+			}
+			shards = append(shards, shard{src: src, size: size, start: start, end: end})
+		}
 	}
 	return shards
 }
