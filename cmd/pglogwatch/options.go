@@ -167,6 +167,35 @@ func (o *options) eachRecordWithFormat(fn func(*pglogwatch.Record, pglogwatch.Fo
 	}
 }
 
+// eachRecordStats is eachRecord for the bench subcommand, which needs each
+// parser's Stats as well as its records -- Stats.Bytes is what the MB/s figure
+// is computed from, and taking it from the parser rather than from file sizes
+// means the number describes what was actually parsed.
+func (o *options) eachRecordStats(fn func(*pglogwatch.Record), done func(pglogwatch.Stats)) error {
+	inputs, err := o.openInputs()
+	if err != nil {
+		return err
+	}
+	defer inputs.Close()
+
+	for {
+		rc, name, ok := inputs.Next()
+		if !ok {
+			return nil
+		}
+		p := pglogwatch.New(rc, o.cfg)
+		for p.Next() {
+			fn(p.Record())
+		}
+		perr := p.Err()
+		done(p.Stats())
+		_ = rc.Close()
+		if perr != nil {
+			return fmt.Errorf("%s: %w", name, perr)
+		}
+	}
+}
+
 // inputSet yields the readers a subcommand should consume.
 type inputSet struct {
 	o      *options
