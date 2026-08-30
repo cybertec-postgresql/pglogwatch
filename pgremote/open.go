@@ -22,11 +22,18 @@ import (
 // ErrNoDir reports a Config with no Dir set.
 var ErrNoDir = errors.New("pgremote: Config.Dir is required")
 
-// listLogDir names the files in the server's log directory.
+// listLogDir names the files in the server's log directory, with their sizes.
 //
 // pg_ls_logdir returns names relative to log_directory, not full paths, which
 // is why Config.Dir is needed separately even though the server knows it.
-const listLogDir = `SELECT name FROM pg_ls_logdir() ORDER BY name`
+//
+// The size is what makes remote reading compose with the local semantics
+// (IFC-006, COR-007): it is the only evidence available here that a file has
+// nothing new, or that it has been truncated and reused. There is no remote
+// equivalent of the content fingerprint the local reader uses, so a rotation
+// that replaces a file with one of the same size is not detectable from here
+// -- that limitation is documented on Open.
+const listLogDir = `SELECT name, size FROM pg_ls_logdir() ORDER BY name`
 
 // readChunk fetches a slice of one file.
 //
@@ -51,6 +58,14 @@ const readChunk = `SELECT pg_read_file($1, $2, $3)`
 //
 // The returned reader cannot seek. Resumption works by offset through the
 // OffsetStore instead, which is what pg_read_file's own interface supports.
+//
+// Rotation is detected by SIZE only: a file shorter than its stored offset is
+// re-read from the start, and one whose size equals its offset is skipped.
+// Unlike the local reader there is no content fingerprint available here, so a
+// rotation that replaces a file with a different one of exactly the same size
+// is not detectable remotely. That is rare -- log files that differ are almost
+// never byte-identical in length -- but it is a real difference between the
+// two readers and not a bug to be found later.
 func Open(ctx context.Context, conn Conn, cfg Config) (io.ReadCloser, error) {
 	if cfg.Dir == "" {
 		return nil, ErrNoDir
@@ -67,19 +82,20 @@ func Open(ctx context.Context, conn Conn, cfg Config) (io.ReadCloser, error) {
 	}, nil
 }
 
-func listNames(ctx context.Context, conn Conn, cfg Config) ([]string, error) {
+func listNames(ctx context.Context, conn Conn, cfg Config) ([]remoteFile, error) {
 	rows, err := conn.Query(ctx, listLogDir)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var names []string
+	var names []remoteFile
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var f remoteFile
+		if err := rows.Scan(&f.name, &f.size); err != nil {
 			return nil, err
 		}
+		name := f.name
 		if cfg.Glob != "" {
 			ok, err := path.Match(cfg.Glob, name)
 			if err != nil {
@@ -89,9 +105,15 @@ func listNames(ctx context.Context, conn Conn, cfg Config) ([]string, error) {
 				continue
 			}
 		}
-		names = append(names, name)
+		names = append(names, f)
 	}
 	return names, rows.Err()
+}
+
+// remoteFile is one entry from pg_ls_logdir().
+type remoteFile struct {
+	name string
+	size int64
 }
 
 // remoteReader streams the log directory over the connection.
@@ -100,7 +122,7 @@ type remoteReader struct {
 	conn Conn
 	cfg  Config
 
-	names []string
+	names []remoteFile
 	idx   int
 
 	curPath string
@@ -224,14 +246,31 @@ func (r *remoteReader) finishFile() {
 // found one.
 func (r *remoteReader) nextFile() bool {
 	for r.idx < len(r.names) {
-		name := r.names[r.idx]
+		f := r.names[r.idx]
 		r.idx++
 
-		full := joinRemote(r.cfg.Dir, name)
+		full := joinRemote(r.cfg.Dir, f.name)
 		var off int64
 		if r.cfg.Offsets != nil {
 			off, _ = r.cfg.Offsets.Get(full)
 		}
+
+		// The same two rotation cases the local reader handles, decided
+		// from the only evidence available remotely (COR-007, E15):
+		if off > 0 {
+			if f.size == off {
+				continue // nothing new since last time
+			}
+			if f.size < off {
+				// Shorter than where we stopped: truncated and
+				// reused under the same name, so the offset
+				// belongs to a file that no longer exists.
+				// Reading from it would skip the new contents
+				// entirely.
+				off = 0
+			}
+		}
+
 		r.curPath, r.curOff, r.flush = full, off, false
 		return true
 	}
