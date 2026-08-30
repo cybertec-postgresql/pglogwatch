@@ -149,3 +149,28 @@ func TestCSVRecordOffsets(t *testing.T) {
 			"Raw must be exactly the bytes at Offset")
 	}
 }
+
+func TestCSVEdgeCRLFMultiline(t *testing.T) {
+	// A CRLF log whose message spans lines. On Windows PostgreSQL's logging
+	// collector opens the file in text mode, so the newline INSIDE the
+	// quoted field is written as CRLF too.
+	//
+	// The record separator's carriage return is removed (COR-006); the one
+	// inside the field is not. The parser cannot tell a text-mode
+	// translation from a carriage return the client actually sent, and
+	// COR-005's principle applies -- pass the bytes through rather than
+	// guess at what they meant.
+	recs, p := parseFixture(t, "csv/crlf-multiline.csv", Config{Format: FormatCSV})
+	require.Len(t, recs, 2, "the CRLF inside the quoted field must not end the record")
+	assert.Zero(t, p.Stats().Malformed)
+
+	r := recs[0]
+	assert.NotZero(t, r.Flags&FlagMultiline)
+	assert.Equal(t, "statement: SELECT a\r\nFROM t", string(r.Message))
+	assert.False(t, bytes.HasSuffix(r.Raw, []byte("\r")))
+	assert.Equal(t, "0", string(r.Raw[len(r.Raw)-1:]),
+		"the record's last byte must be its last field, not a line ending")
+
+	assert.Equal(t, SeverityError, recs[1].Severity)
+	assert.Equal(t, "client backend", string(recs[1].BackendType))
+}
