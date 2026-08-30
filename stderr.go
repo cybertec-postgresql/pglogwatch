@@ -467,10 +467,20 @@ func (p *Parser) continuationTarget(field contField) *[]byte {
 
 // scanRecordDuration fills Duration from the message, shared by every format
 // so that a duration is found wherever PostgreSQL wrote it.
+//
+// Split in two so this half stays inlineable: it is called once per record on
+// every format, and the branch that matters -- "is duration parsing even on"
+// -- is one boolean. Leaving the scan in the same function pushed the inline
+// cost to 90 against a budget of 80, so every record paid a call to decide
+// nothing.
 func (p *Parser) scanRecordDuration() {
-	if !p.cfg.parseDuration() {
+	if p.cfg.NoDuration {
 		return
 	}
+	p.setRecordDuration()
+}
+
+func (p *Parser) setRecordDuration() {
 	if d, ok := scanDuration(p.rec.Message); ok {
 		p.rec.Duration = d
 		p.rec.Flags |= FlagHasDuration
