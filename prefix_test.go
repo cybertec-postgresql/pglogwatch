@@ -216,3 +216,44 @@ func TestPrefixRealisticCombinations(t *testing.T) {
 		assert.Equal(t, "see [4242] for details", string(r.Message))
 	})
 }
+
+// TestPrefixPadding covers E6: PostgreSQL's padding forms, which pad a field
+// to a fixed width so that log lines align in a terminal.
+//
+//	%-5p  left-aligned in five columns:  "42   "
+//	%5p   right-aligned in five columns: "   42"
+//
+// The padding is whitespace the server inserted, not part of the value, so it
+// must not reach the record -- ProcessID must be 42 either way, and a text
+// field must not come back with trailing spaces.
+func TestPrefixPadding(t *testing.T) {
+	t.Run("left-aligned numeric", func(t *testing.T) {
+		r := parseStderrLine(t, "[%-5p] ", "[42   ] LOG:  hello")
+		assert.Equal(t, int32(42), r.ProcessID)
+		assert.Equal(t, "hello", string(r.Message))
+	})
+
+	t.Run("right-aligned numeric", func(t *testing.T) {
+		r := parseStderrLine(t, "[%5p] ", "[   42] LOG:  hello")
+		assert.Equal(t, int32(42), r.ProcessID)
+	})
+
+	t.Run("padding wider than the value is not truncated", func(t *testing.T) {
+		// PostgreSQL pads to at least the width; a longer value is
+		// written in full, so the width is a minimum and not a size.
+		r := parseStderrLine(t, "[%-5p] ", "[3133777] LOG:  hello")
+		assert.Equal(t, int32(3133777), r.ProcessID)
+	})
+
+	t.Run("left-aligned text field", func(t *testing.T) {
+		r := parseStderrLine(t, "%-10u|", "app_user  |LOG:  hello")
+		assert.Equal(t, "app_user", string(r.User), "padding must not become part of the value")
+	})
+
+	t.Run("padding on a timestamp", func(t *testing.T) {
+		r := parseStderrLine(t, "%-30m [%p] ",
+			"2026-08-30 10:11:12.123 CEST   [31337] LOG:  hello")
+		assert.Equal(t, int32(31337), r.ProcessID)
+		assert.Equal(t, 123000000, r.Time.Nanosecond())
+	})
+}
