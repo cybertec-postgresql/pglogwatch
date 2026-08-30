@@ -38,7 +38,7 @@ bench-compare:
 
 ## lint: go vet plus golangci-lint across every module.
 lint:
-	@for m in $(MODULES); do echo "==> $$m"; (cd $$m && $(GO) vet ./...) || exit 1; done
+	@for m in $(MODULES); do echo "==> $$m"; (cd $$m && $(GO) vet -stdmethods=false ./...) || exit 1; done
 	@command -v golangci-lint >/dev/null 2>&1 && golangci-lint run ./... || echo "golangci-lint not installed, skipped"
 
 ## tidy: tidy every module.

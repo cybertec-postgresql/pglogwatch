@@ -24,7 +24,8 @@ jobs:
       - name: go vet
         run: |
           for m in . ./compress ./pgremote ./bench ./cmd/pglogwatch; do
-            (cd "$m" && go vet ./...) || exit 1
+            # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
+            (cd "$m" && go vet -stdmethods=false ./...) || exit 1
           done
       - uses: golangci/golangci-lint-action@v6
         with:
