@@ -289,10 +289,20 @@ func (p *Parser) parseJSONInto(rec []byte) error {
 	// Pieces held back until the scan finishes.
 	var host, port, fn, file, fileLine []byte
 
-	err := scanJSONObject(rec, func(key []byte, val jsonValue) {
+	// setStr stores a borrowed string field and records that the RECORD
+	// needs unquoting only when the value that needs it is one the caller
+	// can actually see. Setting the flag for every escaped value in the
+	// object -- including keys this parser ignores -- would make it mean
+	// "something in the line had a backslash", and a caller acting on it
+	// would run AppendUnquoted over fields with nothing to unquote.
+	setStr := func(dst *[]byte, val jsonValue) {
+		*dst = val.raw
 		if val.escaped {
 			r.Flags |= FlagNeedsUnquote
 		}
+	}
+
+	err := scanJSONObject(rec, func(key []byte, val jsonValue) {
 		switch jsonKeyOf(key) {
 		case jkTimestamp:
 			if ts, _, ok := p.tz.timestamp(val.raw); ok {
@@ -303,9 +313,9 @@ func (p *Parser) parseJSONInto(rec []byte) error {
 				r.SessionStart = ts
 			}
 		case jkUser:
-			r.User = val.raw
+			setStr(&r.User, val)
 		case jkDBName:
-			r.Database = val.raw
+			setStr(&r.Database, val)
 		case jkPID:
 			r.ProcessID, _ = parseInt32(val.raw)
 		case jkRemoteHost:
@@ -313,42 +323,42 @@ func (p *Parser) parseJSONInto(rec []byte) error {
 		case jkRemotePort:
 			port = val.raw
 		case jkSessionID:
-			r.SessionID = val.raw
+			setStr(&r.SessionID, val)
 		case jkLineNum:
 			r.SessionLineNum, _ = parseInt(val.raw)
 		case jkPS:
 			// "ps" is the process title, which is where PostgreSQL
 			// puts the command tag; csvlog's column is command_tag.
-			r.CommandTag = val.raw
+			setStr(&r.CommandTag, val)
 		case jkVXID:
-			r.VirtualXID = val.raw
+			setStr(&r.VirtualXID, val)
 		case jkTXID:
 			r.TransactionID, _ = parseInt(val.raw)
 		case jkErrorSeverity:
-			r.RawSeverity = val.raw
+			setStr(&r.RawSeverity, val)
 			r.Severity = p.sev.resolve(val.raw)
 		case jkStateCode:
 			if len(val.raw) == 5 {
 				copy(r.SQLState[:], val.raw)
 			}
 		case jkMessage:
-			r.Message = val.raw
+			setStr(&r.Message, val)
 		case jkDetail:
-			r.Detail = val.raw
+			setStr(&r.Detail, val)
 		case jkHint:
-			r.Hint = val.raw
+			setStr(&r.Hint, val)
 		case jkInternalQuery:
-			r.InternalQuery = val.raw
+			setStr(&r.InternalQuery, val)
 		case jkInternalPosition:
 			r.InternalQueryPos, _ = parseInt32(val.raw)
 		case jkContext:
-			r.Context = val.raw
+			setStr(&r.Context, val)
 		case jkStatement:
 			// csvlog carries the statement in its query column and
 			// this package mirrors it into Query and Statement;
 			// jsonlog must do the same or the two disagree (COR-004).
-			r.Statement = val.raw
-			r.Query = val.raw
+			setStr(&r.Statement, val)
+			r.Query = r.Statement
 			r.Flags |= FlagHasStatement
 		case jkCursorPosition:
 			r.QueryPos, _ = parseInt32(val.raw)
@@ -359,9 +369,9 @@ func (p *Parser) parseJSONInto(rec []byte) error {
 		case jkFileLineNum:
 			fileLine = val.raw
 		case jkApplicationName:
-			r.ApplicationName = val.raw
+			setStr(&r.ApplicationName, val)
 		case jkBackendType:
-			r.BackendType = val.raw
+			setStr(&r.BackendType, val)
 		case jkLeaderPID:
 			r.LeaderPID, _ = parseInt32(val.raw)
 		case jkQueryID:

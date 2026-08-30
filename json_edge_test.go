@@ -141,3 +141,25 @@ func TestJSONNumericAndNullValues(t *testing.T) {
 	assert.Equal(t, "ok", string(r.Message))
 	assert.Empty(t, r.Detail, "null must read as absent, not as the text null")
 }
+
+func TestJSONUnquoteFlagIsScopedToStoredFields(t *testing.T) {
+	// FlagNeedsUnquote must describe the RECORD the caller can see, not the
+	// line. An escape in a key this parser ignores says nothing about any
+	// field, and flagging it would send the caller looking for escapes that
+	// are not in any field they can read.
+	bs := string([]byte{92})
+	in := `{"error_severity":"LOG","message":"plain text",` +
+		`"some_future_key":"has an escape ` + bs + bs + ` here"}` + "\n"
+	p := New(strings.NewReader(in), Config{Format: FormatJSON})
+	require.True(t, p.Next())
+	r := p.Record()
+	assert.Equal(t, "plain text", string(r.Message))
+	assert.Zero(t, r.Flags&FlagNeedsUnquote,
+		"an escape in an unstored key must not flag the record")
+
+	// And the flag IS set when a stored field carries one.
+	in = `{"error_severity":"LOG","message":"an escape ` + bs + bs + ` here"}` + "\n"
+	p = New(strings.NewReader(in), Config{Format: FormatJSON})
+	require.True(t, p.Next())
+	assert.NotZero(t, p.Record().Flags&FlagNeedsUnquote)
+}
