@@ -20,6 +20,7 @@ func WriteReport(w io.Writer, env Environment, tools []Tool, results []Result) e
 
 	sb.WriteString("# pglogwatch comparative benchmark\n\n")
 	writeEnvironment(&sb, env, tools)
+	writeFairnessNote(&sb)
 	writeResults(&sb, results)
 	writeRatios(&sb, results)
 	writeGaps(&sb, results)
@@ -48,6 +49,32 @@ func writeEnvironment(sb *strings.Builder, env Environment, tools []Tool) {
 	}
 	sb.WriteString("\nThe machine specification is pinned in `bench/MACHINE.md` (TST-014) " +
 		"and must be reproduced verbatim in any published claim.\n\n")
+}
+
+// writeFairnessNote is TST-012, and it is printed ABOVE the numbers on
+// purpose.
+//
+// A reader who meets the table first will have formed a conclusion before
+// reaching a footnote about what was actually compared. Putting the caveats
+// after the numbers is how honest measurements turn into misleading claims.
+func writeFairnessNote(sb *strings.Builder) {
+	sb.WriteString("## What was compared\n\n")
+	sb.WriteString("These tools do not do the same work, and the table below does not " +
+		"pretend otherwise.\n\n")
+	sb.WriteString("- **pgbadger** has no parse-only mode. Its default output is a full " +
+		"HTML report, and it builds that report in memory before writing it. " +
+		"`-o /dev/null` discards the output but not the work, so every pgbadger " +
+		"row includes report construction that the other two tools are not doing. " +
+		"It is the closest available comparison, not an equal one. " +
+		"See `bench/PGBADGER.md` for the exact configuration and why.\n")
+	sb.WriteString("- **pgweasel**'s subcommands are close to pglogwatch's but not " +
+		"identical, and the reports differ in content.\n")
+	sb.WriteString("- **jsonlog is not compared.** pgbadger cannot read it, so a jsonlog " +
+		"row would compare two tools while appearing to compare three. Every " +
+		"workload uses csvlog, which all three support.\n\n")
+	sb.WriteString("The **produces** column records what each tool emitted. Where those " +
+		"differ, the timings are not directly comparable and must not be quoted " +
+		"as though they were (TST-012).\n\n")
 }
 
 func writeResults(sb *strings.Builder, results []Result) {
