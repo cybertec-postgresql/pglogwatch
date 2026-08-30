@@ -41,6 +41,12 @@ type Parser struct {
 	// costs nothing, which is what keeps PERF-001 true for those fields.
 	scratch []byte
 
+	// csvFields holds one record's column slices. It lives on the parser
+	// rather than on the stack so that splitCSVFields writes into memory
+	// that already exists, which is what keeps the split allocation-free
+	// (PERF-005).
+	csvFields [maxCSVColumns][]byte
+
 	// err is the first fatal error. Malformed lines are not fatal and never
 	// land here (IFC-003).
 	err error

@@ -153,3 +153,66 @@ func splitCSVFields(rec []byte, out *[maxCSVColumns][]byte) (int, Flags, error) 
 		i++ // the separator; a trailing one yields a final empty column
 	}
 }
+
+// parseCSVInto fills a Record from a framed csvlog record.
+//
+// The mapping is positional and covers every column PostgreSQL writes, not the
+// prefix a severity counter needs: COR-001 requires the record to be lossless,
+// and a caller who wants the query text should not have to reparse the line.
+func (p *Parser) parseCSVInto(rec []byte) error {
+	n, flags, err := splitCSVFields(rec, &p.csvFields)
+	if err != nil {
+		return err
+	}
+	if !csvLayoutIsKnown(n) {
+		return errShortRecord
+	}
+	f := &p.csvFields
+	r := &p.rec
+	r.Flags |= flags
+	if bytes.IndexByte(rec, '\n') >= 0 {
+		// A newline survived framing, so it was inside a quoted field
+		// and this record spanned several physical lines (E2).
+		r.Flags |= FlagMultiline
+	}
+
+	r.RawSeverity = f[csvErrorSeverity]
+	r.User = f[csvUserName]
+	r.Database = f[csvDatabaseName]
+	r.ConnectionFrom = f[csvConnectionFrom]
+	r.SessionID = f[csvSessionID]
+	r.CommandTag = f[csvCommandTag]
+	r.VirtualXID = f[csvVirtualTransactionID]
+	r.Message = f[csvMessage]
+	r.Detail = f[csvDetail]
+	r.Hint = f[csvHint]
+	r.InternalQuery = f[csvInternalQuery]
+	r.Context = f[csvContext]
+	r.Query = f[csvQuery]
+	r.Location = f[csvLocation]
+	r.ApplicationName = f[csvApplicationName]
+
+	// csvlog has no separate statement column: the statement a record is
+	// about is its query column, which is what stderr writes as STATEMENT:.
+	if len(r.Query) > 0 {
+		r.Statement = r.Query
+		r.Flags |= FlagHasStatement
+	}
+
+	// The five-character SQLSTATE is copied rather than borrowed, because
+	// Record models it as an array. Anything not five bytes is treated as
+	// absent instead of as a short code, since a truncated SQLSTATE would
+	// silently compare equal to a real one on its first characters.
+	if sql := f[csvSQLStateCode]; len(sql) == 5 {
+		copy(r.SQLState[:], sql)
+	}
+
+	if csvHasBackendType(n) {
+		r.BackendType = f[csvBackendType]
+	}
+	if csvHasParallelColumns(n) {
+		r.LeaderPID, _ = parseInt32(f[csvLeaderPID])
+		r.QueryID, _ = parseInt(f[csvQueryID])
+	}
+	return nil
+}

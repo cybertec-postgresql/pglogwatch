@@ -59,7 +59,7 @@ func (p *Parser) splitRecord(data []byte, atEOF bool) (int, []byte, error) {
 func (p *Parser) parseInto(rec []byte) error {
 	switch p.format {
 	case FormatCSV:
-		return p.parseUnstructured(rec) // replaced in T042
+		return p.parseCSVInto(rec)
 	case FormatJSON:
 		return p.parseUnstructured(rec) // replaced in T075
 	default:
