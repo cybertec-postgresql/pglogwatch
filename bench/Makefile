@@ -12,8 +12,15 @@ corpus:
 		-manifest corpus-v1.manifest
 
 ## compare: run pglogwatch against pgbadger and pgweasel (TST-011, §6.4).
+##
+## RUNS defaults to 10, which is TST-011's minimum. WARMUP runs are discarded
+## so the first measured run is not the one that faults the corpus into page
+## cache.
+RUNS   ?= 10
+WARMUP ?= 3
+
 compare:
-	$(GO) run ./cmd/compare -corpus $(CORPUS)
+	$(GO) run ./cmd/compare -corpus $(CORPUS) -runs $(RUNS) -warmup $(WARMUP) -out RESULTS.md
 
 clean:
 	rm -rf $(CORPUS)

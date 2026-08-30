@@ -29,12 +29,21 @@ bench:
 	$(GO) test -run '^$$' -bench . -benchmem ./...
 
 ## corpus: regenerate the versioned benchmark corpus from its seed (TST-003).
+## The manifest is committed; the payload is not (DAT-001).
 corpus:
 	@$(MAKE) -C bench corpus
 
-## bench-compare: pglogwatch vs pgbadger vs pgweasel (GUD-006, VAL-004).
-bench-compare:
+## bench-compare: pglogwatch vs pgbadger vs pgweasel (§6.4, TST-011).
+##
+## Every performance claim in the README or the release notes must be
+## reproducible by this target, citing the corpus version and the reference
+## machine (GUD-006, VAL-004). It runs with whatever is installed and reports
+## the rest as not measured, so it is useful before the pinned runner exists.
+bench-compare: corpus
 	@$(MAKE) -C bench compare
+	@echo
+	@echo "Results written to bench/RESULTS.md."
+	@echo "Any published figure must cite the corpus version and bench/MACHINE.md."
 
 ## lint: go vet plus golangci-lint across every module.
 lint:
