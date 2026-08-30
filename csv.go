@@ -176,7 +176,27 @@ func (p *Parser) parseCSVInto(rec []byte) error {
 		r.Flags |= FlagMultiline
 	}
 
+	// Severity is resolved through the configured locale table, so a
+	// German or Russian server yields SeverityError just as an English one
+	// does, while RawSeverity keeps the original bytes (FMT-007, AC-006).
 	r.RawSeverity = f[csvErrorSeverity]
+	r.Severity = p.sev.resolve(f[csvErrorSeverity])
+
+	// Timestamps go through the parser's zone cache rather than
+	// time.Parse, and integers through parseInt over bytes rather than
+	// strconv (PERF-006, PERF-007).
+	if ts, _, ok := p.tz.timestamp(f[csvLogTime]); ok {
+		r.Time = ts
+	}
+	if ts, _, ok := p.tz.timestamp(f[csvSessionStartTime]); ok {
+		r.SessionStart = ts
+	}
+	r.ProcessID, _ = parseInt32(f[csvProcessID])
+	r.SessionLineNum, _ = parseInt(f[csvSessionLineNum])
+	r.TransactionID, _ = parseInt(f[csvTransactionID])
+	r.QueryPos, _ = parseInt32(f[csvQueryPos])
+	r.InternalQueryPos, _ = parseInt32(f[csvInternalQueryPos])
+
 	r.User = f[csvUserName]
 	r.Database = f[csvDatabaseName]
 	r.ConnectionFrom = f[csvConnectionFrom]

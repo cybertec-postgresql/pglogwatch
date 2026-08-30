@@ -76,7 +76,12 @@ func TestCSVAllColumnsRetrievable(t *testing.T) {
 	assert.Equal(t, SeverityError, err.Severity)
 	assert.Equal(t, "ERROR", string(err.RawSeverity))
 	assert.Equal(t, [5]byte{'4', '2', 'P', '0', '1'}, err.SQLState)
-	assert.Equal(t, `relation "no_such_table" does not exist`, string(err.Message))
+	// Unescaping is deferred, so Message still holds the doubled quotes
+	// exactly as PostgreSQL wrote them (PERF-009).
+	assert.Equal(t, `relation ""no_such_table"" does not exist`, string(err.Message))
+	assert.NotZero(t, err.Flags&FlagNeedsUnquote)
+	assert.Equal(t, `relation "no_such_table" does not exist`,
+		string(AppendUnquoted(nil, err.Message, FormatCSV)))
 	assert.Equal(t, "SELECT * FROM no_such_table;", string(err.Query))
 	assert.Equal(t, int32(15), err.QueryPos)
 	assert.Equal(t, "parserOpenTable, parse_relation.c:1392", string(err.Location))
