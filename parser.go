@@ -26,6 +26,10 @@ type Parser struct {
 	tz  tzCache
 	sev severityResolver
 
+	// prefix is the compiled log_line_prefix for stderr input, compiled
+	// once per parser (PAT-002). Nil until configured or detected.
+	prefix *prefixTemplate
+
 	// detectedPrefix records the log_line_prefix in force for stderr
 	// input, whether it was configured or inferred (FMT-004).
 	detectedPrefix string
@@ -70,5 +74,18 @@ func New(r io.Reader, cfg Config) *Parser {
 		sev:    newSeverityResolver(cfg.MessagesLang),
 	}
 	p.buf = newBuf(r, &p.cfg, &p.stats)
+	if cfg.LinePrefix != "" {
+		// A prefix the caller supplied and got wrong is a configuration
+		// error, not bad input, so unlike a malformed line it is fatal
+		// and reported through Err (IFC-003).
+		tpl, err := compilePrefix(cfg.LinePrefix)
+		if err != nil {
+			p.err = err
+			p.done = true
+			return p
+		}
+		p.prefix = tpl
+		p.detectedPrefix = tpl.String()
+	}
 	return p
 }

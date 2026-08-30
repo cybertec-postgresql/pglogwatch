@@ -63,7 +63,7 @@ func (p *Parser) parseInto(rec []byte) error {
 	case FormatJSON:
 		return p.parseUnstructured(rec) // replaced in T075
 	default:
-		return p.parseUnstructured(rec) // replaced in T060
+		return p.parseStderrInto(rec)
 	}
 }
 

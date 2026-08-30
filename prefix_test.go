@@ -159,7 +159,7 @@ func TestPrefixEveryEscape(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.escape, func(t *testing.T) {
 			r := parseStderrLine(t, c.prefix, c.line)
-			assert.Equal(t, SeverityLog, max(r.Severity, SeverityLog),
+			assert.NotEqual(t, SeverityUnknown, r.Severity,
 				"the severity must still parse after the prefix")
 			assert.Equal(t, "hello", string(r.Message),
 				"the message must survive the prefix intact")
