@@ -53,7 +53,12 @@ func TestParallelScanAcrossAllFormats(t *testing.T) {
 func TestParallelScanUsesEveryWorker(t *testing.T) {
 	// Sharding that produced one non-empty shard would pass every
 	// correctness test above and deliver no parallelism at all.
-	data := bigLog(t, 5000)
+	//
+	// The input has to be big enough to be worth splitting: shards below
+	// minShardBytes are not created, because coordinating them costs more
+	// than the parsing they save. 20000 records is comfortably past that
+	// for four workers.
+	data := bigLog(t, 20000)
 	_, byWorker := collect(t, []io.ReaderAt{bytes.NewReader(data)},
 		Config{Format: FormatJSON}, 4)
 
