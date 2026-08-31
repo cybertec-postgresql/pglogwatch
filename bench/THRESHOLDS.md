@@ -99,7 +99,7 @@ skips. **Not yet verified**; it needs the pinned runner.
 | PERF-026 memory O(1) in input size | **met** — measured, see below |
 | PERF-026 under 64 MiB for a 10 GB input | **met in substance** — 563 KB at 400 000 records; the 10 GB scale itself was not run |
 | PERF-026 measured as peak **RSS** | **met** — 3.6–5.0 MB in the container, against a 64 MiB bound; not measurable on the development machine |
-| PERF-027 peak RSS under 25 % of pgbadger's, at most 1.25× pgweasel's | **met** — 4.0 MB against pgbadger's 66.3 MB (6 %) and pgweasel's 75.2 MB (0.05×); see below |
+| PERF-027 peak RSS under 25 % of pgbadger's, at most 1.25× pgweasel's | **met** — 4.2 MB against pgbadger's 66.2 MB (6 %) and pgweasel's 75.1 MB (0.06×); see below |
 | PERF-028 top-K aggregations O(K), not O(distinct) | **met** — flat across a 10× input in all four reports |
 
 `TestMemoryDoesNotGrowWithInput` samples the heap on a timer while parsing, so
@@ -145,9 +145,10 @@ at once.
 
 | item | value |
 |---|---|
-| image | `golang:1.24-bookworm`, pgweasel built from source in `rust:1-bookworm` |
+| image | `bench/Dockerfile` -- `make compare-docker` |
 | pgbadger | 12.0 (Debian bookworm package) |
-| pgweasel | 0.1, commit `f2abfe42ac04316bfe889a2ea7ddd658fc5f26ec` |
+| pgweasel | 0.1 (Rust), commit `f2abfe42ac04316bfe889a2ea7ddd658fc5f26ec` |
+| pgweasel-go | last Go build, commit `231132a5d5175cfc00434a25b8f6a5772307399e` |
 | corpus | corpus-v1, seed 20260830, 200 000 records, 61 MB csvlog |
 | runs | 5, after 2 discarded warmups |
 
@@ -157,13 +158,22 @@ hold and which do not; the pinned runner establishes the numbers.
 
 ### Speed
 
-| workload | pglogwatch | pgbadger | ratio | pgweasel | ratio |
-|---|---:|---:|---:|---:|---:|
-| W1 parse and discard | 0.089 s | 12.269 s | **138.5×** | _not implemented_ | — |
-| W2 severity histogram | 0.114 s | 11.258 s | **98.8×** | _not implemented_ | — |
-| W3 errors report | 0.091 s | 11.268 s | **123.5×** | 0.073 s | **0.80×** |
-| W4 top slow queries | 0.107 s | 11.254 s | **104.8×** | 0.276 s | **2.57×** |
-| W5 parallel, 8 workers | 0.054 s | 14.447 s | **269.4×** | _not implemented_ | — |
+| workload | pglogwatch | pgbadger | ratio | pgweasel (Rust) | ratio | pgweasel-go | ratio |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| W1 parse and discard | 0.089 s | 11.274 s | **127.3×** | _not implemented_ | — | 0.477 s | **5.4×** |
+| W2 severity histogram | 0.114 s | 11.261 s | **98.9×** | _not implemented_ | — | 0.461 s | **4.0×** |
+| W3 errors report | 0.090 s | 11.255 s | **125.0×** | 0.071 s | **0.78×** | 0.379 s | **4.2×** |
+| W4 top slow queries | 0.106 s | 11.263 s | **106.0×** | 0.285 s | **2.68×** | 0.560 s | **5.3×** |
+| W5 parallel, 8 workers | 0.054 s | 15.591 s | **286.6×** | _not implemented_ | — | 1.252 s | **23.0×** |
+
+**pgweasel is measured twice**, because it was a Go program until late 2025 and
+is Rust now, and PERF-025 does not say which one it means. The current release
+is what a user installing pgweasel gets, so it is what PERF-025 is judged
+against; the Go build is reported beside it and gates nothing.
+
+The rewrite paid off for them: Rust is 5.3× faster than the Go build on W3 and
+2.0× on W4. It is also why three cells are empty -- the Rust `stats` subcommand
+is not implemented yet, and the Go build's is.
 
 **PERF-024 (≥ 10× `pgbadger -j 1`) is met in every workload**, by 99–269×. The
 margin is large because the comparison is not equal and does not claim to be:
@@ -178,14 +188,23 @@ workloads**: pgweasel 0.1's `stats` subcommand is not implemented. It prints an
 error, writes nothing, and exits 0 -- which the harness originally timed and
 reported as pglogwatch losing by 7×. It now refuses the cell instead.
 
-### PERF-025 W3: not met, at 0.80×
+Against the Go build, which does implement `stats`, all five workloads measure
+and pglogwatch leads by **4.0× to 23.0×**. That does not satisfy PERF-025 --
+the threshold is about the tool that exists today, not the one that did -- but
+it is what the three empty cells would otherwise leave unsaid.
 
-pgweasel produces its error report in 0.073 s against pglogwatch's 0.091 s --
-833 MB/s to 669 MB/s. This is a real measurement of two tools doing comparable
+### PERF-025 W3: not met, at 0.78×
+
+pgweasel produces its error report in 0.071 s against pglogwatch's 0.090 s --
+866 MB/s to 678 MB/s. This is a real measurement of two tools doing comparable
 work, and it is recorded as unmet rather than explained away.
 
+This gap is new in the Rust rewrite: the Go build takes 0.379 s on the same
+workload, which pglogwatch beats by 4.2×. Whatever changed between the two is
+worth reading before profiling anything here.
+
 What the timing does not show is the other half of the trade. pgweasel used
-**75.2 MB** of resident memory to pglogwatch's **4.0 MB**, and emitted 8.5 MB of
+**75.1 MB** of resident memory to pglogwatch's **4.2 MB**, and emitted 8.5 MB of
 raw matching lines where pglogwatch emits an aggregated histogram with top
 messages. It is buying that 25 % with roughly nineteen times the memory and a
 different, cheaper output.
@@ -199,23 +218,26 @@ targets 1.2×, so parity alone would not close it.
 
 Peak RSS, maximum across runs, now that a platform reports it:
 
-| workload | pglogwatch | pgbadger | pgweasel |
-|---|---:|---:|---:|
-| W1 | 3.8 MB | 66.3 MB | — |
-| W2 | 3.6 MB | 66.2 MB | — |
-| W3 | 4.0 MB | 66.3 MB | 75.2 MB |
-| W4 | 4.2 MB | 66.3 MB | 105.3 MB |
-| W5 | 5.0 MB | 69.1 MB | — |
+| workload | pglogwatch | pgbadger | pgweasel (Rust) | pgweasel-go |
+|---|---:|---:|---:|---:|
+| W1 | 3.8 MB | 66.3 MB | — | 73.2 MB |
+| W2 | 3.6 MB | 66.2 MB | — | 72.7 MB |
+| W3 | 4.2 MB | 66.2 MB | 75.1 MB | 71.7 MB |
+| W4 | 5.0 MB | 66.3 MB | 105.5 MB | 72.3 MB |
+| W5 | 5.2 MB | 69.1 MB | — | 73.0 MB |
 
 **PERF-027 is met with a wide margin.** The requirement is under 25 % of
 pgbadger's and at most 1.25× pgweasel's; the measurement is 6 % of pgbadger's
-and 0.05× pgweasel's. Both baselines hold the log in memory and pglogwatch does
-not, which is the whole design, and this is the first measurement that shows it
-against something rather than against itself.
+and 0.06× pgweasel's. Every baseline holds the log in memory and pglogwatch
+does not, which is the whole design, and this is the first measurement that
+shows it against something rather than against itself.
 
-Note that pglogwatch's RSS is flat at 3.6–5.0 MB across every workload,
-including the eight-worker one, while pgweasel's varies with the report
-(75 MB to 105 MB).
+pglogwatch's RSS is flat at 3.6–5.2 MB across every workload, including the
+eight-worker one. Every baseline sits in the 66–105 MB band regardless of
+language or era: pgbadger 66–69 MB, pgweasel-go 71–73 MB, Rust pgweasel
+75–105 MB. The rewrite made pgweasel two to five times faster without making it
+smaller, which is the clearest evidence in this table that the memory result is
+architectural rather than an artefact of the language.
 
 ## Regression gate (PERF-030)
 
