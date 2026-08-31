@@ -67,6 +67,13 @@ func writeFairnessNote(sb *strings.Builder) {
 		"row includes report construction that the other two tools are not doing. " +
 		"It is the closest available comparison, not an equal one. " +
 		"See `bench/PGBADGER.md` for the exact configuration and why.\n")
+	sb.WriteString("- **pgweasel is measured twice.** It was a Go program until late 2025 " +
+		"and is Rust now. The Rust release has not implemented the `stats` " +
+		"subcommand that three of these workloads use, and the Go build has. " +
+		"Measuring only the current release would leave those rows empty; " +
+		"measuring only the Go build would compare against a program nobody " +
+		"can install today. PERF-025 is judged against the current release, " +
+		"and the Go build is reported beside it.\n")
 	sb.WriteString("- **pgweasel**'s subcommands are close to pglogwatch's but not " +
 		"identical, and the reports differ in content.\n")
 	sb.WriteString("- **jsonlog is not compared.** pgbadger cannot read it, so a jsonlog " +
@@ -116,8 +123,11 @@ func writeRatios(sb *strings.Builder, results []Result) {
 	sb.WriteString("## Thresholds\n\n")
 	sb.WriteString("PERF-024 requires at least 10x pgbadger. PERF-025 requires at least " +
 		"parity with pgweasel, targeting 1.2x; parity blocks release, 1.2x does not.\n\n")
-	sb.WriteString("| workload | vs pgbadger | PERF-024 | vs pgweasel | PERF-025 |\n")
-	sb.WriteString("|---|---:|---|---:|---|\n")
+	sb.WriteString("The **pgweasel-go** column is the last Go build of pgweasel, measured " +
+		"for context. It gates nothing: PERF-025 is judged against the current " +
+		"release, which is Rust.\n\n")
+	sb.WriteString("| workload | vs pgbadger | PERF-024 | vs pgweasel | PERF-025 | vs pgweasel-go |\n")
+	sb.WriteString("|---|---:|---|---:|---|---:|\n")
 
 	byKey := map[string]Result{}
 	for _, r := range results {
@@ -126,15 +136,17 @@ func writeRatios(sb *strings.Builder, results []Result) {
 	for _, w := range Workloads("") {
 		ours := byKey[w.ID+"/pglogwatch"]
 		if ours.MedianSec <= 0 {
-			fmt.Fprintf(sb, "| %s | | _not measured_ | | _not measured_ |\n", w.ID)
+			fmt.Fprintf(sb, "| %s | | _not measured_ | | _not measured_ | |\n", w.ID)
 			continue
 		}
 		badger := ratio(ours, byKey[w.ID+"/pgbadger"])
 		weasel := ratio(ours, byKey[w.ID+"/pgweasel"])
-		fmt.Fprintf(sb, "| %s | %s | %s | %s | %s |\n",
+		weaselGoRatio := ratio(ours, byKey[w.ID+"/"+weaselGo])
+		fmt.Fprintf(sb, "| %s | %s | %s | %s | %s | %s |\n",
 			w.ID,
 			ratioText(badger), verdict(badger, 10.0),
-			ratioText(weasel), verdict(weasel, 1.0))
+			ratioText(weasel), verdict(weasel, 1.0),
+			ratioText(weaselGoRatio))
 	}
 	sb.WriteString("\n")
 }

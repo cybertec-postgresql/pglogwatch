@@ -3,7 +3,7 @@ RECORDS ?= 200000
 SEED    ?= 20260830
 CORPUS  ?= corpus
 
-.PHONY: corpus compare clean
+.PHONY: corpus compare compare-docker clean
 
 ## corpus: regenerate the benchmark corpus from its seed (TST-003, DAT-001).
 ## The payload is not committed; the manifest is.
@@ -28,3 +28,24 @@ compare:
 
 clean:
 	rm -rf $(CORPUS)
+
+## compare-docker: run the comparison in a throwaway container.
+##
+## The baselines are not installable everywhere -- pgbadger is Perl, pgweasel
+## needs a Rust toolchain for the current release and a Go one for the last Go
+## build -- and PERF-027 is stated in peak RSS, which Go reads through
+## ru_maxrss and Windows does not provide. The container supplies all three and
+## a platform that can measure them.
+##
+## It is NOT the pinned runner (INF-002), so figures from it may not be
+## published as meeting a threshold (VAL-004).
+IMAGE ?= pglogwatch-bench
+
+compare-docker:
+	docker build -t $(IMAGE) .
+	docker run --rm -v "$(CURDIR)/..:/src:ro" $(IMAGE) sh -c '\
+		cp -r /src/. /work/ && cd /work && rm -rf .git && \
+		(cd cmd/pglogwatch && go build -o /usr/local/bin/pglogwatch .) && \
+		cd bench && make corpus RECORDS=$(RECORDS) && \
+		BENCH_VERSION_PGWEASEL_GO="Go build @$$(cat /pgweasel-go.commit)" \
+		make compare RUNS=$(RUNS) WARMUP=$(WARMUP) && cat RESULTS.md'

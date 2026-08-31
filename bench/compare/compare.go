@@ -32,11 +32,26 @@ type Tool struct {
 	Found   bool
 }
 
-// Tools are the three baselines §6.4 names.
+// Tools are the baselines §6.4 names, plus one the specification could not
+// have named.
+//
+// pgweasel was a Go program until late 2025 and is Rust now (the rewrite
+// landed at 9eec24be, the Go sources were deleted at 6475ff03). PERF-025 names
+// "pgweasel" without saying which, and the two differ enough that the choice
+// changes the answer: Rust 0.1 has not implemented the "stats" subcommand that
+// three of the five workloads use, and the Go build has.
+//
+// So both are measured. "pgweasel" is the current release, and it is what
+// PERF-025 is judged against, because that is what a user installing pgweasel
+// today gets. "pgweasel-go" is the last Go commit, measured alongside for
+// context and never gating anything.
 //
 // pglogwatch is run from source through "go run" when its binary is not built,
 // so the harness works in a checkout without an install step.
-var Tools = []string{"pglogwatch", "pgbadger", "pgweasel"}
+var Tools = []string{"pglogwatch", "pgbadger", "pgweasel", "pgweasel-go"}
+
+// weaselGo is the tool name for the Go-era pgweasel.
+const weaselGo = "pgweasel-go"
 
 // Workload is one row of the §6.4 table.
 type Workload struct {
@@ -163,13 +178,14 @@ func WithBinary(tools []Tool, name, path, version string) []Tool {
 }
 
 func versionOf(name, path string) string {
-	var args []string
-	switch name {
-	case "pgbadger":
-		args = []string{"--version"}
-	default:
-		args = []string{"--version"}
+	// The Go-era pgweasel has no --version flag, so its identity is the
+	// commit it was built from -- which only whoever built it knows. An
+	// env var lets the image say so rather than leaving the results table
+	// reading "unknown" for a pinned baseline (INF-003).
+	if v := os.Getenv(versionEnv(name)); v != "" {
+		return v
 	}
+	args := []string{"--version"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
@@ -177,6 +193,12 @@ func versionOf(name, path string) string {
 		return "unknown"
 	}
 	return strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+}
+
+// versionEnv is the variable that can name a tool's version when the tool
+// cannot name it itself: BENCH_VERSION_PGWEASEL_GO, and so on.
+func versionEnv(tool string) string {
+	return "BENCH_VERSION_" + strings.ToUpper(strings.ReplaceAll(tool, "-", "_"))
 }
 
 // slowThreshold is passed to both tools in W4.
@@ -205,11 +227,13 @@ func Workloads(corpusDir string) []Workload {
 			// before discarding it. Recorded, not hidden.
 			"pgbadger": {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel": {"stats", csvlog},
+			weaselGo:   {"stats", csvlog},
 		},
 		Produces: map[string]string{
 			"pglogwatch": "throughput summary",
 			"pgbadger":   "full report, written to /dev/null",
 			"pgweasel":   "statistics summary",
+			weaselGo:     "statistics summary (Go build)",
 		},
 	}, {
 		ID:   "W2",
@@ -218,11 +242,13 @@ func Workloads(corpusDir string) []Workload {
 			"pglogwatch": {"stats", "--jobs", "1", csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel":   {"stats", csvlog},
+			weaselGo:     {"stats", csvlog},
 		},
 		Produces: map[string]string{
 			"pglogwatch": "severity and event counts",
 			"pgbadger":   "full report including an error section",
 			"pgweasel":   "statistics summary",
+			weaselGo:     "statistics summary (Go build)",
 		},
 	}, {
 		ID:   "W3",
@@ -231,11 +257,13 @@ func Workloads(corpusDir string) []Workload {
 			"pglogwatch": {"errors", "--jobs", "1", csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel":   {"errors", csvlog},
+			weaselGo:     {"errors", csvlog},
 		},
 		Produces: map[string]string{
 			"pglogwatch": "severity histogram and top messages",
 			"pgbadger":   "full report including an error section",
 			"pgweasel":   "error report",
+			weaselGo:     "error report (Go build)",
 		},
 	}, {
 		ID:   "W4",
@@ -244,11 +272,13 @@ func Workloads(corpusDir string) []Workload {
 			"pglogwatch": {"slow", "--jobs", "1", "--min-duration", slowThreshold, csvlog},
 			"pgbadger":   {"-j", "1", "-o", devnull, "-f", "csv", csvlog},
 			"pgweasel":   {"slow", slowThreshold, csvlog},
+			weaselGo:     {"slow", slowThreshold, csvlog},
 		},
 		Produces: map[string]string{
 			"pglogwatch": "slowest and most-total-time statements",
 			"pgbadger":   "full report including slowest queries",
 			"pgweasel":   "slow query report",
+			weaselGo:     "slow query report (Go build)",
 		},
 	}, {
 		ID:   "W5",
@@ -257,11 +287,13 @@ func Workloads(corpusDir string) []Workload {
 			"pglogwatch": append([]string{"stats", "--jobs", "8"}, csvFiles(corpusDir)...),
 			"pgbadger":   append([]string{"-J", "8", "-o", devnull, "-f", "csv"}, csvFiles(corpusDir)...),
 			"pgweasel":   append([]string{"stats"}, csvFiles(corpusDir)...),
+			weaselGo:     append([]string{"stats"}, csvFiles(corpusDir)...),
 		},
 		Produces: map[string]string{
 			"pglogwatch": "severity and event counts, 8 workers",
 			"pgbadger":   "full report, 8 jobs",
 			"pgweasel":   "statistics summary; parallelism as supported",
+			weaselGo:     "statistics summary (Go build); parallelism as supported",
 		},
 	}}
 }
