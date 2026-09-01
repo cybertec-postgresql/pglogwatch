@@ -30,12 +30,27 @@ now rather than at release.
 Corpus files of 56–154 MB, well beyond L3, measured with
 `go test -bench BenchmarkCorpus` in `bench/`.
 
-| requirement | floor | measured | verdict |
-|---|---:|---:|---|
-| PERF-020 csvlog, full field parse | 250 MB/s | **667 MB/s** | met, 2.7× |
-| PERF-021 csvlog, severity-only scan | 800 MB/s | **660 MB/s** | **NOT MET** |
-| PERF-022 stderr, full field parse | 200 MB/s | **477 MB/s** | met, 2.4× |
-| PERF-023 jsonlog, full field parse | 150 MB/s | **750 MB/s** | met, 5.0× |
+| requirement | floor | first run | re-measured | verdict |
+|---|---:|---:|---:|---|
+| PERF-020 csvlog, full field parse | 250 MB/s | 667 MB/s | **607–756 MB/s** | met |
+| PERF-021 csvlog, severity-only scan | 800 MB/s | 660 MB/s | **585–598 MB/s** | **NOT MET** |
+| PERF-022 stderr, full field parse | 200 MB/s | 477 MB/s | **381–384 MB/s** | met |
+| PERF-023 jsonlog, full field parse | 150 MB/s | 750 MB/s | **597–610 MB/s** | met |
+
+The second column is the original measurement; the third is the same benchmark
+re-run at release (three runs of fifteen iterations each, the range being the
+spread between runs). **They do not agree**, and the disagreement is the most
+useful number in this file: stderr moved by 20 %, jsonlog by 20 %, and csvlog's
+own three runs spanned 25 % between themselves.
+
+Nothing changed in those paths between the two measurements that could account
+for it. What changed is the machine's state -- thermal headroom, page cache,
+whatever else was running. A threshold verdict drawn from either column is a
+verdict about this laptop on that afternoon, which is exactly what VAL-004
+refuses to accept and what INF-002's pinned runner exists to fix. Only
+PERF-021's verdict is safe from it, because the gap there is structural rather
+than marginal: there is no severity-only scan, so no amount of quiet machine
+would close a 200 MB/s deficit.
 
 All four report 0 allocations per record; the 7–16 allocs/op in the raw output
 are per-iteration setup (opening the file, constructing the parser) and do not
@@ -43,9 +58,10 @@ scale with record count.
 
 ### PERF-021: not met, and why
 
-The measured 660 MB/s is essentially identical to the full-parse figure of
-667 MB/s, and that is the whole explanation: **there is no severity-only scan
-to measure.** `Parser.Next` extracts every field of every record, so a caller
+The severity-only figure sits inside the full-parse figure's own run-to-run
+range in both measurements -- 660 against 667, then 585-598 against 607-756 --
+and that is the whole explanation: **there is no severity-only scan to
+measure.** `Parser.Next` extracts every field of every record, so a caller
 that reads only `Record.Severity` still pays for the timestamps, the integers
 and the field boundaries.
 

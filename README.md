@@ -214,14 +214,15 @@ error, `2` no input matched.
 
 ## Performance
 
-**Throughput,** measured with `task bench` over the generated corpus:
+**Throughput** over the generated corpus (files of 56–154 MB, well beyond L3),
+three runs of fifteen iterations. The ranges are the spread between runs:
 
 | format | workload | floor (§3.3) | measured |
 |---|---|---:|---:|
-| csvlog | full field parse | 250 MB/s | 651 MB/s |
-| csvlog | severity only | 800 MB/s | **643 MB/s** |
-| stderr | full field parse | 200 MB/s | 367 MB/s |
-| jsonlog | full field parse | 150 MB/s | 793 MB/s |
+| csvlog | full field parse | 250 MB/s | 607–756 MB/s |
+| csvlog | severity only | 800 MB/s | **585–598 MB/s** |
+| stderr | full field parse | 200 MB/s | 381–384 MB/s |
+| jsonlog | full field parse | 150 MB/s | 597–610 MB/s |
 
 **Against other tools,** the §6.4 workloads over `corpus-v1` (200 000 records,
 61 MB csvlog), median of 5 runs after 2 warmups:
@@ -243,11 +244,12 @@ eight-worker one, against 66–69 MB for pgbadger and 75–105 MB for pgweasel.
   unpinned developer laptop (AMD Ryzen 9 7940HS, windows/amd64, Go 1.26.5,
   boost enabled, machine not dedicated). `bench/MACHINE.md` is the pinned
   specification and is not yet filled in, because the benchmark runner it
-  describes does not exist. Every figure here carries more variance than the
-  5 % a regression gate would need.
+  describes does not exist. The 25 % spread on the csvlog row above is what
+  that costs: one workload moving further between runs than the 5 % a
+  regression gate would need to resolve.
 - **Two thresholds are not met**, and are printed in bold above rather than
-  omitted. csvlog severity-only scanning reaches 643 MB/s against a floor of
-  800, because there is no severity-only mode to measure — `Next` extracts
+  omitted. csvlog severity-only scanning stays under 600 MB/s against a floor
+  of 800, because there is no severity-only mode to measure — `Next` extracts
   every field, so a caller reading only `Severity` still pays for the rest.
   pgweasel is 1.3× faster on the errors report. `bench/THRESHOLDS.md` gives the
   measured value, the cause and the remediation for both.
