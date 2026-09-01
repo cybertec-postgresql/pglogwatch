@@ -163,7 +163,7 @@ func psql(t *testing.T, dsn, sql string) string {
 func parseOracleRows(t *testing.T, out string) [][]string {
 	t.Helper()
 	var rows [][]string
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 		if line == "" {
 			continue
 		}

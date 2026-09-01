@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -96,7 +96,7 @@ func ExampleParallelScan() {
 		return
 	}
 
-	sort.Strings(severities)
+	slices.Sort(severities)
 	fmt.Println(severities)
 	// Output: [ERROR ERROR LOG LOG WARNING WARNING]
 }

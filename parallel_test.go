@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -106,8 +106,8 @@ func TestParallelScanMatchesASingleParser(t *testing.T) {
 	require.NoError(t, p.Err())
 
 	got, _ := collect(t, []io.ReaderAt{bytes.NewReader(data)}, Config{Format: FormatJSON}, 8)
-	sort.Strings(want)
-	sort.Strings(got)
+	slices.Sort(want)
+	slices.Sort(got)
 	assert.Equal(t, want, got)
 }
 func TestParallelScanAcrossSeveralSources(t *testing.T) {

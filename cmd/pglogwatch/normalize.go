@@ -18,9 +18,7 @@ func normalizeMessage(dst, msg []byte) []byte {
 	inQuote := byte(0)
 	prevDigit := false
 
-	for i := 0; i < len(msg); i++ {
-		c := msg[i]
-
+	for _, c := range msg {
 		if inQuote != 0 {
 			if c == inQuote {
 				inQuote = 0

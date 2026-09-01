@@ -1,7 +1,6 @@
 package pgremote_test
 
 import (
-	"context"
 	"io"
 	"strings"
 	"testing"
@@ -108,7 +107,7 @@ func TestReadsAFileInChunks(t *testing.T) {
 	expectLogDir(mock, [2]any{"postgresql.json", int64(len(content))})
 	expectChunks(mock, "/var/log/pg/postgresql.json", content, chunk)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir:       "/var/log/pg",
 		ChunkSize: chunk,
 	})
@@ -134,7 +133,7 @@ func TestReadsSeveralFilesInOrder(t *testing.T) {
 	expectChunks(mock, "/var/log/pg/log-1.json", a, chunk)
 	expectChunks(mock, "/var/log/pg/log-2.json", b, chunk)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: chunk,
 	})
 	require.NoError(t, err)
@@ -152,7 +151,7 @@ func TestGlobFiltersTheListing(t *testing.T) {
 		[2]any{"postgresql.csv", int64(999)})
 	expectChunks(mock, "/var/log/pg/postgresql.json", content, 1000)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", Glob: "*.json", ChunkSize: 1000,
 	})
 	require.NoError(t, err)
@@ -176,7 +175,7 @@ func TestServerPathsUseForwardSlashes(t *testing.T) {
 		WithArgs("/var/log/pg/postgresql.json", int64(0), int64(1000)).
 		WillReturnRows(pgxmock.NewRows([]string{"pg_read_file"}).AddRow(content))
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: 1000,
 	})
 	require.NoError(t, err)
@@ -211,7 +210,7 @@ func TestResumesFromAStoredOffset(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"pg_read_file"}).AddRow(content[half:]))
 
 	store := memStore{"/var/log/pg/postgresql.json": half}
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: 1 << 20, Offsets: store,
 	})
 	require.NoError(t, err)
@@ -234,7 +233,7 @@ func TestSkipsAFileWithNothingNew(t *testing.T) {
 	// No pg_read_file expectation at all: any call fails the test.
 
 	store := memStore{"/var/log/pg/postgresql.json": int64(len(content))}
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", Offsets: store,
 	})
 	require.NoError(t, err)
@@ -253,7 +252,7 @@ func TestRereadsATruncatedFile(t *testing.T) {
 	expectChunks(mock, "/var/log/pg/postgresql.json", content, 1<<20)
 
 	store := memStore{"/var/log/pg/postgresql.json": 99999}
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: 1 << 20, Offsets: store,
 	})
 	require.NoError(t, err)
@@ -271,7 +270,7 @@ func TestFinalLineWithoutANewlineIsDelivered(t *testing.T) {
 	expectLogDir(mock, [2]any{"postgresql.json", int64(len(content))})
 	expectChunks(mock, "/var/log/pg/postgresql.json", content, 1<<20)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: 1 << 20,
 	})
 	require.NoError(t, err)
@@ -284,14 +283,14 @@ func TestFinalLineWithoutANewlineIsDelivered(t *testing.T) {
 
 func TestOpenRequiresADirectory(t *testing.T) {
 	mock := newMock(t)
-	_, err := pgremote.Open(context.Background(), mock, pgremote.Config{})
+	_, err := pgremote.Open(t.Context(), mock, pgremote.Config{})
 	assert.ErrorIs(t, err, pgremote.ErrNoDir)
 }
 
 func TestListingErrorIsReturned(t *testing.T) {
 	mock := newMock(t)
 	mock.ExpectQuery("pg_ls_logdir").WillReturnError(assertErr)
-	_, err := pgremote.Open(context.Background(), mock, pgremote.Config{Dir: "/var/log/pg"})
+	_, err := pgremote.Open(t.Context(), mock, pgremote.Config{Dir: "/var/log/pg"})
 	assert.ErrorIs(t, err, assertErr)
 }
 
@@ -305,7 +304,7 @@ func TestReadErrorIsReturned(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(assertErr)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{Dir: "/var/log/pg"})
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{Dir: "/var/log/pg"})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, rc.Close()) }()
 
@@ -321,7 +320,7 @@ func TestCloseDoesNotCloseTheConnection(t *testing.T) {
 	expectLogDir(mock, [2]any{"postgresql.json", int64(len(content))})
 	expectChunks(mock, "/var/log/pg/postgresql.json", content, 1<<20)
 
-	rc, err := pgremote.Open(context.Background(), mock, pgremote.Config{
+	rc, err := pgremote.Open(t.Context(), mock, pgremote.Config{
 		Dir: "/var/log/pg", ChunkSize: 1 << 20,
 	})
 	require.NoError(t, err)
@@ -330,7 +329,7 @@ func TestCloseDoesNotCloseTheConnection(t *testing.T) {
 
 	// Still usable afterwards.
 	expectLogDir(mock, [2]any{"postgresql.json", int64(len(content))})
-	_, err = pgremote.Open(context.Background(), mock, pgremote.Config{Dir: "/var/log/pg"})
+	_, err = pgremote.Open(t.Context(), mock, pgremote.Config{Dir: "/var/log/pg"})
 	assert.NoError(t, err)
 }
 
