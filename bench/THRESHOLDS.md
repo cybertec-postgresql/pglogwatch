@@ -100,18 +100,30 @@ such. Option 1 is the recommendation.
 ## Parallel scaling (PERF-029, AC-019)
 
 **NOT MET, and the cause is in this code rather than in the machine.** An
-earlier revision of this file blamed memory bandwidth on a laptop. Two
-measurements say otherwise.
+earlier revision of this file blamed memory bandwidth on a laptop. Three
+machines say otherwise.
 
-| where | cores | speedup at 8 workers |
+| where | physical / logical cores | speedup at 8 workers |
 |---|---:|---:|
-| development laptop (Ryzen 9 7940HS) | 8 physical / 16 logical | 4.07–4.33× |
-| a larger Linux server | 16 | **3.69×** |
+| development laptop (Ryzen 9 7940HS) | 8 / 16 | 4.07–4.33× |
+| server (Ryzen 7 5700G) | 8 / 16 | 3.69× |
+| server (Threadripper 2950X) | **16 / 32** | **3.99×** |
 
-The bigger machine scaled *worse*. That alone disposes of the bandwidth
-explanation, and a second experiment confirms it: holding everything else
-constant and growing the working set makes scaling **better**, which is the
-opposite of what a bandwidth ceiling produces.
+The last row is the decisive one. It runs eight workers on a machine with
+eight further cores left idle, so no worker contends with another for a
+physical core or shares an SMT sibling — and it lands in the same band as the
+two machines that have exactly eight. Doubling the hardware available to the
+same eight workers changed nothing. That is what "the ceiling is in the code"
+means, measured rather than inferred.
+
+An earlier reading of the middle row called that machine 16-core and treated
+its 3.69× as the surprising result. It has 8 physical cores and 16 threads,
+the same parallel width as the laptop, so it was never the wider machine it
+looked like. The Threadripper is.
+
+A second experiment agrees: holding everything else constant and growing the
+working set makes scaling **better**, which is the opposite of what a
+bandwidth ceiling produces.
 
 | total working set | speedup at 8 workers |
 |---|---:|

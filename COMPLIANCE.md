@@ -56,7 +56,7 @@ Status values:
 | AC-016 | the pgbadger ratio is measured and published | local | 99×–287×, `bench/THRESHOLDS.md` |
 | AC-017 | the pgweasel ratio is measured and published, gaps reported | local | 0.78× on W3, 2.68× on W4, three workloads reported as unmeasurable |
 | AC-018 | peak RSS < 64 MiB on a 10 GB input, < 25 % of pgbadger's | partial | **4.1 MiB measured on a real 10.17 GB input**; the pgbadger half not yet measured at that scale |
-| AC-019 | ≥ 6× throughput at 8 workers | **unmet** | 4.07–4.33× on the laptop, 3.69× on a 16-core server; the cause is in `ParallelScan`, not the machine |
+| AC-019 | ≥ 6× throughput at 8 workers | **unmet** | 3.69–4.33× across three machines, including 3.99× on a 16-core Threadripper; the cause is in `ParallelScan`, not the machine |
 | AC-020 | CI fails on a > 5 % regression or any new allocation | **blocked** | needs the pinned runner (T146) |
 
 ### Packaging and integration
@@ -125,11 +125,14 @@ remediations; the recommended one now has to say how it pays for the exported
 identifier it needs, since the API budget is full (T165).
 
 **AC-019 / PERF-029 — parallel scaling: 4.75× at 8 workers against a 6× floor.**
-This was recorded as a laptop's memory-bandwidth limit. It is not. A 16-core
-Linux server scaled *worse* (3.69×) than the 8-core laptop, and growing the
-working set makes scaling *better* rather than worse — the opposite of a
-bandwidth ceiling. The cause is a fixed per-call cost in `ParallelScan` that
-does not parallelise, plus `planShards` clamping shards per source to the
+This was recorded as a laptop's memory-bandwidth limit. It is not. Eight
+workers on a 16-core Threadripper — eight cores idle, no SMT contention —
+reach 3.99×, the same band as two machines with exactly eight cores. Doubling
+the hardware moved nothing. Growing the working set makes scaling *better*
+rather than worse, which is the opposite of a bandwidth ceiling.
+
+The cause is a fixed per-call cost in `ParallelScan` that does not
+parallelise, plus `planShards` clamping shards per source to the
 worker count, so a 1-worker run and an 8-worker run divide the same input into
 8 and 64 shards respectively and do not do equal work. `bench/THRESHOLDS.md`
 has the measurements and a two-step remediation.
