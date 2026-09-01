@@ -22,14 +22,23 @@ func splitJSONRecord(data []byte, atEOF bool, emitTail bool) (int, []byte, error
 // Performance notes for this path (GUD-001, GUD-002, GUD-003).
 //
 // Measured on the fixtures at 1 MB, AMD Ryzen 9 7940HS / windows/amd64 / Go
-// 1.26.5: full parse 797 MB/s, severity-only 810 MB/s, both 0 allocs/op.
-// PERF-023's floor is 150 MB/s. jsonlog outruns csvlog here (797 against 672)
+// 1.26.5: full parse 793 MB/s, severity-only 810 MB/s, both 0 allocs/op.
+// PERF-023's floor is 150 MB/s. jsonlog outruns csvlog here (793 against 651)
 // because its records are longer, so the fixed per-record cost is spread over
 // more bytes -- not because a JSON scan is cheaper than a CSV scan.
 //
 // The only heap escapes on this path are the scratch buffer's appends, which
 // are its growth: at 200 benchmark iterations that shows as 1 B/op, at 3000 as
 // 0 B/op. That is the steady state PERF-001 defines.
+//
+// Bounds-check elimination (GUD-001). This is the one format whose per-byte
+// scanning is written in Go rather than delegated to bytes.IndexByte, so it is
+// the one place where a per-iteration check is worth removing: skipJSONSpace,
+// scanJSONString and the number scan in scanJSONValue each walk a tail slice
+// instead of indexing the record, which moves their check from once per byte
+// to once per call. skipJSONSpace and scanJSONString stay inlineable, which is
+// the constraint that keeps the change worth making. Verified with
+// -gcflags=-d=ssa/check_bce/debug=1 and -gcflags=-m.
 //
 // One structural cost is known and deliberately kept: scanJSONObject calls a
 // closure per key, and the closure is far too large to inline (cost 1157
@@ -103,11 +112,21 @@ func scanJSONObject(rec []byte, visit func(key []byte, val jsonValue)) error {
 	return errBadJSON
 }
 
+// skipJSONSpace advances past insignificant whitespace.
+//
+// Written as a range over the tail rather than as an indexed walk over b, for
+// bounds-check elimination (GUD-001). In `for i < len(b) { ... b[i] ... }` the
+// check survives on every iteration, because i arrives as a parameter and the
+// compiler cannot prove it is non-negative. Slicing once moves that to a single
+// check on the slice expression and leaves the loop clean. Verified with
+// -gcflags=-d=ssa/check_bce/debug=1.
 func skipJSONSpace(b []byte, i int) int {
-	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\r' || b[i] == '\n') {
-		i++
+	for j, c := range b[i:] {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return i + j
+		}
 	}
-	return i
+	return len(b)
 }
 
 // scanJSONString reads a quoted string starting at b[i], returning its content
@@ -119,19 +138,25 @@ func skipJSONSpace(b []byte, i int) int {
 // closes normally, while a string containing an escaped quote does not close
 // there. Getting either wrong shifts every following key by one and produces a
 // record that looks plausible and is wrong.
+//
+// The scan walks a tail slice rather than indexing b, which is the same
+// bounds-check hint skipJSONSpace uses (GUD-001). It cannot be a range loop:
+// an escape advances by two, and assigning to a range variable does not move
+// the iteration.
 func scanJSONString(b []byte, i int) (jsonValue, int, bool) {
 	i++ // the opening quote
-	start := i
+	rest := b[i:]
+	j := 0
 	escaped := false
-	for i < len(b) {
-		switch b[i] {
+	for j < len(rest) {
+		switch rest[j] {
 		case '\\':
 			escaped = true
-			i += 2 // the backslash and whatever it escapes
+			j += 2 // the backslash and whatever it escapes
 		case '"':
-			return jsonValue{raw: b[start:i], str: true, escaped: escaped}, i + 1, true
+			return jsonValue{raw: rest[:j], str: true, escaped: escaped}, i + j + 1, true
 		default:
-			i++
+			j++
 		}
 	}
 	return jsonValue{}, 0, false
@@ -164,19 +189,22 @@ func scanJSONValue(b []byte, i int) (jsonValue, int, bool) {
 	}
 	// A number. jsonlog never writes a nested object or array, so anything
 	// else is not jsonlog and the caller should report it as malformed.
-	start := i
-	for i < len(b) {
-		c := b[i]
+	//
+	// The same tail-slice hint, for the same reason.
+	rest := b[i:]
+	n := 0
+	for n < len(rest) {
+		c := rest[n]
 		if isDigit(c) || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E' {
-			i++
+			n++
 			continue
 		}
 		break
 	}
-	if i == start {
+	if n == 0 {
 		return jsonValue{}, 0, false
 	}
-	return jsonValue{raw: b[start:i]}, i, true
+	return jsonValue{raw: rest[:n]}, i + n, true
 }
 
 // jsonKey identifies one of the keys PostgreSQL's jsonlog writer emits.

@@ -17,6 +17,30 @@ import "bytes"
 //	outside quotes: find the next '"' or '\n', whichever comes first
 //	inside quotes:  find the next '"', and check whether it is doubled
 
+// Performance notes for this path (GUD-001, GUD-002, GUD-003).
+//
+// Measured on the fixtures at 1 MB, AMD Ryzen 9 7940HS / windows/amd64 / Go
+// 1.26.5: full parse 651 MB/s, severity-only 643 MB/s, framing alone 630 MB/s,
+// all 0 allocs/op. PERF-020's floor is 250 MB/s. That the three figures are
+// within 3 % of each other is the finding worth keeping: framing dominates, and
+// field extraction is nearly free once the record boundary is known. It is also
+// why PERF-021's separate severity-only floor of 800 MB/s is not met -- there
+// is no cheaper mode to be in. bench/THRESHOLDS.md records that in full.
+//
+// Bounds-check elimination (GUD-001). Ten checks survive in this file, and all
+// ten are per-record or per-field rather than per-byte, because every per-byte
+// scan here is a bytes.IndexByte or bytes.Count call -- assembly with its own
+// bounds established once. Rewriting the field walk to carry tail slices, which
+// is what removes a per-iteration check elsewhere, would trade a check
+// performed a dozen times per record for pointer arithmetic performed a dozen
+// times per record. Verified with -gcflags=-d=ssa/check_bce/debug=1.
+//
+// Escape analysis (GUD-003). Nothing on this path reaches the heap: `data` and
+// `rec` leak only into the returned sub-slices, which is the borrowing contract
+// rather than an allocation, and splitCSVFields's `out` parameter is reported
+// as "does not escape". The note on parseCSVInto explains what would break
+// that.
+
 // splitCSVRecord frames one csvlog record. It follows the splitFunc contract.
 //
 // The scan is two SIMD passes per candidate record rather than a walk through
