@@ -1,6 +1,6 @@
 module github.com/cybertec-postgresql/pglogwatch/compress
 
-go 1.24
+go 1.26.0
 
 require (
 	github.com/klauspost/compress v1.19.2

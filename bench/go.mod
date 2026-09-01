@@ -1,6 +1,6 @@
 module github.com/cybertec-postgresql/pglogwatch/bench
 
-go 1.24
+go 1.26.0
 
 require github.com/cybertec-postgresql/pglogwatch v0.0.0
 

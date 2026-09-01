@@ -46,7 +46,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 **Purpose**: Repository, module layout, toolchain and CI skeleton
 
 - [x] T001 Create the public repository `cybertec-postgresql/pglogwatch` with pgwatch's branch protection and release conventions (INF-001); add `LICENSE` (BSD-3-Clause, COM-001) and a `README.md` whose first line reads "zero-allocation PostgreSQL log parser" (PKG-008)
-- [x] T002 Create root `go.mod` declaring `module github.com/cybertec-postgresql/pglogwatch` and `go 1.24` with an empty non-test `require` block (PKG-001, PKG-002, PKG-005, PLT-001)
+- [x] T002 Create root `go.mod` declaring `module github.com/cybertec-postgresql/pglogwatch` and `go 1.26` with an empty non-test `require` block (PKG-001, PKG-002, PKG-005, PLT-001)
 - [x] T003 [P] Add `github.com/stretchr/testify` as a test-only dependency in the root `go.mod` (PKG-003)
 - [x] T004 [P] Create nested module skeletons with their own `go.mod`: `compress/`, `pgremote/`, `cmd/pglogwatch/`, `bench/` (PKG-004)
 - [x] T005 [P] Configure linting and formatting in `.golangci.yml` (`go vet`, `staticcheck`, `gofumpt`) and add `Makefile` targets `test`, `test-race`, `cover`, `fuzz`, `bench`, `bench-compare`, `corpus`, `lint`
@@ -422,7 +422,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 - [ ] T172 [P] Audit for global mutable state and confirm all state lives in `Parser` / `Config` values (CON-002)
 - [ ] T173 [P] Audit that the library performs no logging and no filesystem access outside the requested reader constructors (CON-003, CON-005)
 - [ ] T174 Final BCE and escape-analysis sweep across all three hot loops, with the documenting comments GUD-003 requires (GUD-001, GUD-003)
-- [ ] T175 [P] Apply the repository's `modern-go` Go 1.24+ idiom guidance across the module (GUD-005)
+- [ ] T175 [P] Apply the repository's `modern-go` Go 1.26+ idiom guidance across the module (GUD-005)
 - [ ] T176 Write release notes publishing the §6.4 comparative table, citing `bench/MACHINE.md` and the corpus version, and stating the measured value, cause and remediation for any unmet threshold (VAL-004, VAL-010)
 - [ ] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006)
 - [ ] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001)
