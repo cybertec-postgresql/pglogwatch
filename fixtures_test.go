@@ -2,8 +2,11 @@ package pglogwatch
 
 import (
 	"io/fs"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -105,4 +108,96 @@ func TestFixtureBytesSurvivedCheckout(t *testing.T) {
 		// records, one of which spans three lines.
 		assert.Equal(t, 6, strings.Count(string(b), "\n"))
 	})
+}
+
+// TestFixturesCarryNoRealIdentifiers is TST-005 and COM-002.
+//
+// Every fixture in the repository today is hand-written and synthetic:
+// app_user, appdb, psql, orders, and addresses in 10.0.0.0/8. Nothing needed
+// scrubbing. The check exists for the fixture that has not been added yet.
+//
+// TST-005 permits real-world samples, and a real-world sample is exactly what
+// a contributor reaches for the first time a customer reports a log this
+// parser mishandles. That file arrives by copy-and-paste from a support
+// ticket, and the identifiers in it -- a username, a hostname, a client
+// address, a query parameter -- are personal data the moment they are pushed
+// to a public repository. Catching it at `go test` is the only point in that
+// sequence where it is still cheap.
+func TestFixturesCarryNoRealIdentifiers(t *testing.T) {
+	err := filepath.WalkDir("testdata", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := os.ReadFile(path) //nolint:gosec // a fixture path from the walk
+		if err != nil {
+			return err
+		}
+		checkNoIdentifiers(t, path, string(body))
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// publicTLDs is the suffix list the hostname check works from.
+//
+// A denylist rather than an allowlist, because a fixture is full of dotted
+// names that are not hostnames -- parse_relation.c, pg13-basic.csv, 12.0.1 --
+// and requiring every one of them to end in a reserved suffix produces a test
+// that cries wolf until somebody deletes it. These are the suffixes a
+// copy-and-pasted hostname from a real deployment actually carries.
+var publicTLDs = []string{
+	"com", "net", "org", "io", "co", "eu", "dev", "app", "cloud", "ai",
+	"de", "at", "ch", "uk", "fr", "nl", "pl", "ua", "ru", "us",
+	"info", "biz", "gov", "edu",
+}
+
+func checkNoIdentifiers(t *testing.T, path, body string) {
+	t.Helper()
+
+	for _, addr := range reIPv4.FindAllString(body, -1) {
+		if !isNonIdentifyingIP(addr) {
+			t.Errorf("%s contains the routable address %s; TST-005 requires "+
+				"real-world samples to be scrubbed. Use 10.0.0.0/8 or one of the "+
+				"RFC 5737 documentation ranges instead", path, addr)
+		}
+	}
+	for _, addr := range reEmail.FindAllString(body, -1) {
+		t.Errorf("%s contains the e-mail address %s; TST-005 requires it to be scrubbed", path, addr)
+	}
+	for _, host := range reHostname.FindAllString(body, -1) {
+		last := strings.ToLower(host[strings.LastIndexByte(host, '.')+1:])
+		if slices.Contains(publicTLDs, last) {
+			t.Errorf("%s contains the hostname %s, which names a real host; "+
+				"TST-005 requires real-world samples to be scrubbed", path, host)
+		}
+	}
+}
+
+var (
+	reIPv4  = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
+	reEmail = regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)
+	// A hostname here is a dotted name whose last label is alphabetic, which
+	// is what separates host.example.com from parse_relation.c and from a
+	// version number.
+	reHostname = regexp.MustCompile(`\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}\b`)
+)
+
+// isNonIdentifyingIP reports whether an address is one that cannot name a real
+// host on the internet: the RFC 1918 private ranges, loopback, link-local, and
+// the RFC 5737 ranges reserved for documentation.
+func isNonIdentifyingIP(s string) bool {
+	ip, err := netip.ParseAddr(s)
+	if err != nil {
+		// Not an address at all -- a version number, or a file offset.
+		return true
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		return true
+	}
+	for _, block := range []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24"} {
+		if netip.MustParsePrefix(block).Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
