@@ -61,8 +61,6 @@ var (
 // public API later is additive; demoting an exported one would not be.
 var (
 	errShortRecord    = newParseError("pglogwatch: record has too few fields")
-	errBadTimestamp   = newParseError("pglogwatch: unrecognised timestamp")
-	errBadInteger     = newParseError("pglogwatch: unrecognised integer field")
 	errPrefixMismatch = newParseError("pglogwatch: line does not match log_line_prefix")
 	errBadJSON        = newParseError("pglogwatch: malformed JSON object")
 	errUnterminated   = newParseError("pglogwatch: unterminated quoted field")

@@ -76,17 +76,6 @@ func (p *Parser) parseInto(rec []byte) error {
 	}
 }
 
-// parseUnstructured is the skeleton's field scanner: it treats the whole
-// record as its message and leaves every other field absent.
-//
-// It is a real fallback, not only a placeholder -- a record that no format
-// parser can decompose is still a line of a log, and losing it entirely would
-// break COR-001. Each format replaces this with its own scanner.
-func (p *Parser) parseUnstructured(rec []byte) error {
-	p.rec.Message = rec
-	return nil
-}
-
 // resetFormatState clears per-stream parsing state on Reset. Each format adds
 // its own state here as it is implemented.
 func (p *Parser) resetFormatState() {

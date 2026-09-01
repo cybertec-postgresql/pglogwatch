@@ -108,6 +108,3 @@ func (c *Config) normalize() {
 
 // emitTruncatedTail reports the specification's EmitTruncatedTail setting.
 func (c *Config) emitTruncatedTail() bool { return !c.NoTruncatedTail }
-
-// parseDuration reports the specification's ParseDuration setting.
-func (c *Config) parseDuration() bool { return !c.NoDuration }

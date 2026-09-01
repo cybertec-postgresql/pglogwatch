@@ -49,13 +49,13 @@ func (t *prefixTemplate) scanPrefix(line []byte, r *Record, tz *tzCache) ([]byte
 func (t *prefixTemplate) scanSegments(line []byte, pos, from, to int, r *Record, tz *tzCache) (int, bool) {
 	for i := from; i < to; i++ {
 		s := &t.segs[i]
-		switch {
-		case s.esc == 0:
+		switch s.esc {
+		case 0:
 			if !hasPrefix(line[pos:], s.lit) {
 				return 0, false
 			}
 			pos += len(s.lit)
-		case s.esc == 'q':
+		case 'q':
 			// A marker, not a value. Handled by the caller.
 		default:
 			val, consumed, ok := t.scanValue(line, pos, i, to)

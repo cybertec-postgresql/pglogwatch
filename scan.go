@@ -1,29 +1,18 @@
 package pglogwatch
 
-import "bytes"
-
 // Byte scanning primitives.
 //
 // PERF-004 forbids regexp anywhere the parser can reach. The existing pgwatch
 // implementation splits a csvlog line with a regex built from non-greedy
 // groups and optional quote handling, which is close to the slowest available
 // way to do it, and still only covers the first 12 of 23 to 26 columns. Every
-// scan here is a hand-written walk driven by bytes.IndexByte, which compiles
-// to an assembly routine using SIMD on every platform this module targets.
+// scan in this package is a hand-written walk driven by bytes.IndexByte, which
+// compiles to an assembly routine using SIMD on every platform this module
+// targets.
 //
 // The helpers are small and side-effect free so the inliner will take them
 // (GUD-002); anything that stops being inlined shows up as a regression in the
 // benchmarks rather than as a silent slowdown.
-
-// cutByte splits b at the first occurrence of c. When c is absent it returns
-// b, nil, false -- the same shape as strings.Cut, so the caller's control flow
-// reads the same way.
-func cutByte(b []byte, c byte) (before, after []byte, found bool) {
-	if i := bytes.IndexByte(b, c); i >= 0 {
-		return b[:i], b[i+1:], true
-	}
-	return b, nil, false
-}
 
 // trimCR removes a single trailing carriage return.
 //
