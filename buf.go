@@ -227,10 +227,7 @@ func (b *buf) grow() bool {
 	if len(b.data) >= b.max {
 		return false
 	}
-	size := len(b.data) * 2
-	if size < b.initial {
-		size = b.initial
-	}
+	size := max(len(b.data)*2, b.initial)
 	if size > b.max {
 		size = b.max
 	}

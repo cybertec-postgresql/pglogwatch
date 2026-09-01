@@ -16,7 +16,7 @@ WORKDIR /src
 # was that day" makes a change in the ratio unattributable.
 RUN git rev-parse HEAD > /commit && cargo build --release --locked
 
-FROM golang:1.24-bookworm AS weasel-go
+FROM golang:1.26-bookworm AS weasel-go
 # The last commit that touched the Go sources. NOT the commit that deleted
 # them (6475ff03), which is a tree with the Rust program already in place.
 ARG WEASEL_GO_REV=231132a5d5175cfc00434a25b8f6a5772307399e
@@ -24,7 +24,7 @@ RUN git clone https://github.com/kmoppel/pgweasel /src
 WORKDIR /src
 RUN git checkout -q $WEASEL_GO_REV && go build -o /pgweasel-go . && echo $WEASEL_GO_REV > /commit
 
-FROM golang:1.24-bookworm
+FROM golang:1.26-bookworm
 RUN apt-get update \
  && apt-get install -y --no-install-recommends pgbadger time \
  && rm -rf /var/lib/apt/lists/*

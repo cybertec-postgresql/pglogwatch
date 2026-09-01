@@ -58,7 +58,7 @@ integration; reviewers validating the performance claims.
 
 **Assumptions**:
 
-- Go toolchain version 1.24 or newer (pgwatch is on 1.26; the module targets 1.24 to widen adoption).
+- Go toolchain version 1.26 or newer (matching pgwatch).
 - Input logs are produced by PostgreSQL 12 through 18.
 - Input encoding is UTF-8 or any ASCII-compatible single-byte encoding.
 
@@ -111,7 +111,7 @@ integration; reviewers validating the performance claims.
   | `pglogwatch/cmd/pglogwatch` | Reference CLI | CLI flag / pretty-print libraries |
   | `pglogwatch/bench` | Comparative benchmark harness | benchmark tooling |
 
-- **PKG-005**: The module MUST declare `go 1.24` and MUST build on `linux/amd64`,
+- **PKG-005**: The module MUST declare `go 1.26` and MUST build on `linux/amd64`,
   `linux/arm64`, `darwin/arm64`, and `windows/amd64`.
 - **PKG-006**: The public API of the root package MUST be frozen at v1.0.0 and follow semantic
   versioning thereafter.
@@ -274,7 +274,7 @@ single process, warm page cache, output discarded.
   not escape; regressions here are the usual cause of surprise allocations.
 - **GUD-004**: Provide `iter.Seq2` convenience wrappers, but keep the low-level
   `Next()` / `Record()` / `Err()` API as the documented zero-allocation path.
-- **GUD-005**: Follow the repository's `modern-go` guidance for Go 1.24+ idioms.
+- **GUD-005**: Follow the repository's `modern-go` guidance for Go 1.26+ idioms.
 - **GUD-006**: Every performance claim in the README or release notes MUST be reproducible via
   `make bench-compare` and MUST cite the corpus version and reference machine.
 
@@ -829,9 +829,8 @@ its subcommand set deliberately mirrors pgweasel's.
 
 ### Technology Platform Dependencies
 
-- **PLT-001**: Go 1.24 or newer — required for `iter.Seq2` range-over-func and current
-  `unsafe.String` semantics. pgwatch is on 1.26; targeting 1.24 widens adoption at no cost to
-  anything the module needs.
+- **PLT-001**: Go 1.26 or newer — required for `iter.Seq2` range-over-func and current
+  `unsafe.String` semantics; matches the toolchain pgwatch is on.
 - **PLT-002**: `CGO_ENABLED=0` builds on `linux/amd64`, `linux/arm64`, `darwin/arm64`, and
   `windows/amd64`.
 - **PLT-003**: Perl runtime — benchmark runner only, for pgbadger.

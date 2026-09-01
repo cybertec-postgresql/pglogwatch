@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
 
       # The corpus is what makes a nightly 30 minutes worth more than the
       # first 30 minutes ever run: without it every night restarts from the

@@ -84,9 +84,7 @@ func TestParallelScanConcurrentCallsAreIndependent(t *testing.T) {
 	var wg sync.WaitGroup
 	counts := make([]atomic.Int64, 4)
 	for i := range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := ParallelScan(t.Context(), []io.ReaderAt{bytes.NewReader(data)},
 				Config{Format: FormatJSON}, 4,
 				func(_ int, _ *Record) error {
@@ -94,7 +92,7 @@ func TestParallelScanConcurrentCallsAreIndependent(t *testing.T) {
 					return nil
 				})
 			assert.NoError(t, err)
-		}()
+		})
 	}
 	wg.Wait()
 	for i := range counts {
