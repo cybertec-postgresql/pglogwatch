@@ -52,6 +52,16 @@ tasks:
       - '{{.GO}} test -run ''^$'' -fuzz FuzzPrefixTemplate -fuzztime 30s .'
       - '{{.GO}} test -run ''^$'' -fuzz FuzzUnquote -fuzztime 30s .'
 
+  fuzz-release:
+    desc: The VAL-005 gate: 10 million executions per target, ~5 minutes.
+    # An execution count, not a wall-clock budget: VAL-005 is stated in
+    # executions, and -fuzztime 30s measures the machine instead. See
+    # FUZZING.md for the run that satisfied it.
+    cmds:
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzParseRecord -fuzztime 10000000x .'
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzPrefixTemplate -fuzztime 10000000x .'
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzUnquote -fuzztime 10000000x .'
+
   bench:
     desc: Parser benchmarks with allocation accounting (AC-012).
     cmds:
