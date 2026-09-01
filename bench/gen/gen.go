@@ -151,14 +151,25 @@ const (
 	kindDeadlock
 )
 
+// flattenMix pairs each Mix weight with the event kind it selects, in one
+// fixed order so the two slices index together.
+//
+// The two slices are built as separate statements rather than as two composite
+// literals inside the return. gofmt gives a multi-line composite literal in a
+// multi-value return an extra hanging indent, and that form has proved not to
+// be agreed on across gofmt builds -- it formatted clean locally and failed in
+// CI. A plain assignment has only one correct indentation, so this cannot
+// disagree with anyone.
 func flattenMix(m Mix) ([]int, []eventKind) {
-	return []int{
-			m.SlowQuery, m.Connection, m.Error, m.Autovacuum,
-			m.Checkpoint, m.TempFile, m.LockWait, m.Deadlock,
-		}, []eventKind{
-			kindSlowQuery, kindConnection, kindError, kindAutovacuum,
-			kindCheckpoint, kindTempFile, kindLockWait, kindDeadlock,
-		}
+	weights := []int{
+		m.SlowQuery, m.Connection, m.Error, m.Autovacuum,
+		m.Checkpoint, m.TempFile, m.LockWait, m.Deadlock,
+	}
+	kinds := []eventKind{
+		kindSlowQuery, kindConnection, kindError, kindAutovacuum,
+		kindCheckpoint, kindTempFile, kindLockWait, kindDeadlock,
+	}
+	return weights, kinds
 }
 
 var (

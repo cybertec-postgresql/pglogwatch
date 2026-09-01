@@ -40,12 +40,17 @@ jobs:
         working-directory: ${{ matrix.module }}
         # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
         run: go vet -stdmethods=false ./...
-      # v8 is the first action release that runs golangci-lint v2. .golangci.yml
-      # is written to the v2 schema (top-level `version`, `formatters`,
-      # `linters.settings`), which v1 rejects outright at `config verify`.
-      # No `version:` input: the action then installs the latest v2 itself.
-      - uses: golangci/golangci-lint-action@v8
+      # golangci-lint v2 is required: .golangci.yml is written to the v2 schema
+      # (top-level `version`, `formatters`, `linters.settings`), which v1
+      # rejects outright at `config verify`.
+      #
+      # `latest` tracks the newest release, so the rule set can change without
+      # a commit here -- a revision that passed yesterday can fail today. That
+      # is the accepted trade for not having to bump a pin by hand; when it
+      # happens, fix the finding rather than reaching for a pin.
+      - uses: golangci/golangci-lint-action@v9
         with:
+          version: latest
           working-directory: ${{ matrix.module }}
 
   test:
