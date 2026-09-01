@@ -131,6 +131,22 @@ jobs:
           for m in . ./compress ./pgremote ./bench ./cmd/pglogwatch; do
             (cd "$m" && go build ./...) || exit 1
           done
+      # go build compiles the packages; it does not compile their tests. A
+      # test helper guarded by a build tag -- of which this repository has
+      # several, since peak RSS is readable on Unix and not on Windows -- can
+      # therefore break a platform without failing anything here, and surface
+      # only when somebody runs the suite on it. go vet type-checks the test
+      # files too, which is what makes the cross-build claim cover the whole
+      # tree rather than the non-test half of it.
+      - name: cross type-check, tests included
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
+        run: |
+          for m in . ./compress ./pgremote ./bench ./cmd/pglogwatch; do
+            (cd "$m" && go vet -stdmethods=false ./...) || exit 1
+          done
       # PKG-007: the purego fallback must stay compilable.
       - name: cross build (purego)
         env:
