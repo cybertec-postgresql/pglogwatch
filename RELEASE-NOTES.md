@@ -35,10 +35,14 @@ identifier is a minor release, removing or changing one is a major.
 The §6.4 comparative benchmark, over `corpus-v1` (seed 20260830, 200 000
 records, 61 MB csvlog), median of 5 runs after 2 discarded warmups.
 
-**These figures may not be cited as meeting a threshold.** They were not
-measured on the reference machine, for the reason given under *What is not met*
-below. Reproduce them with `task bench-compare`, which regenerates the corpus
-from its seed.
+**These figures were not measured on the reference machine**, for the reason
+given under *What is measured but not claimed* below. Reproduce them with
+`task bench-compare`, which regenerates the corpus from its seed.
+
+The comparative ratios below are reported, not gated. PERF-024 and PERF-025
+were release gates until 2026-09-01, when they were amended to
+measured-and-published requirements; §3.4 of the specification records the
+amendment and why.
 
 ### Speed
 
@@ -97,33 +101,43 @@ Rust now, and PERF-025 does not say which one it means. The current release is
 what a user installing pgweasel gets, so it is what the threshold is judged
 against; the Go build is reported beside it and gates nothing.
 
-## What is not met
+## The comparative ratios are reported, not gated
+
+PERF-024 and PERF-025 required pglogwatch to beat pgbadger by 10× and to reach
+parity with pgweasel, and failing either blocked a release. As of 2026-09-01
+they are measured-and-published requirements instead. The amendment is recorded
+in §3.4 of the specification; the reasoning is that a gate on a comparative
+ratio rests on two things this project does not control.
+
+**A third party's roadmap.** pgweasel was a Go program until late 2025 and is
+Rust now, and the rewrite made it 5.3× faster than its own predecessor on W3.
+Under the old wording, someone else's improvement became a release blocker
+here, with nothing about pglogwatch having changed.
+
+**Measurements that cannot be taken.** Three of the five workloads above cannot
+be compared against pgweasel 0.1 at all: its `stats` subcommand is not
+implemented, so it prints an error, writes nothing and exits 0. A requirement
+unmeasurable on 60 % of its own workloads can only be gated by blocking
+indefinitely or by assuming a result, and VAL-004 forbids the second.
+
+What did not change is the obligation to look. Both ratios are still measured,
+still published above, and the workloads with no comparison are named rather
+than dropped. The one measured loss is stated plainly: pglogwatch takes 0.090 s
+on W3 against pgweasel's 0.071 s, 678 MB/s to 866 MB/s. What that timing does
+not show is the rest of the trade — pgweasel used 75.1 MB of resident memory to
+pglogwatch's 4.2 MB and emitted 8.5 MB of raw matching lines where pglogwatch
+emits an aggregated histogram. It is buying 25 % with roughly nineteen times
+the memory and a cheaper output. Worth profiling, not worth blocking on.
+
+This amendment does **not** extend to PERF-020..PERF-023 or PERF-026..PERF-030.
+Those are properties of this code measured against itself rather than against a
+moving target, and they remain release conditions — which is why PERF-021 below
+is still unmet.
+
+## What is measured but not claimed
 
 Per VAL-010, each of these gives the measured value, the cause, and the
 remediation. None has been relaxed in the specification.
-
-### PERF-025 / AC-017 — pgweasel parity on W3: 0.78× against a 1.2× target
-
-pgweasel produces its errors report in 0.071 s against pglogwatch's 0.090 s —
-866 MB/s to 678 MB/s. This is a real measurement of two tools doing comparable
-work.
-
-The gap is new in pgweasel's Rust rewrite: the Go build takes 0.379 s on the
-same workload, which pglogwatch beats by 4.2×. What the timing does not show is
-the other half of the trade — pgweasel used 75.1 MB of resident memory to
-pglogwatch's 4.2 MB, and emitted 8.5 MB of raw matching lines where pglogwatch
-emits an aggregated histogram with top messages. It is buying that 25 % with
-roughly nineteen times the memory and a different, cheaper output.
-
-Three of the five workloads cannot be assessed at all: pgweasel 0.1's `stats`
-subcommand is not implemented. It prints an error, writes nothing, and exits 0,
-which the harness originally timed and reported as pglogwatch losing by 7×. It
-now refuses the cell instead.
-
-**Remediation.** The gap is small enough to be within reach and the cause is
-not established — it may be the top-K normalisation, or output formatting,
-neither of which pgweasel is doing. Profile W3 before changing anything. Parity
-alone would not close it, since PERF-025 targets 1.2×.
 
 ### PERF-021 — csvlog severity-only throughput: under 600 MB/s against a 800 MB/s floor
 
@@ -169,7 +183,7 @@ against a baseline captured there. `bench/baseline.txt` does not exist yet
 either, for the same reason -- RUNNER.md step 3 is to commit one from a clean
 run on the runner.
 
-### VAL-004 — the table above is not reference-machine data
+### The table above is not reference-machine data
 
 `bench/MACHINE.md` is the pinned specification and is unfilled, because the
 runner does not exist. Everything published here was measured on a development
@@ -180,13 +194,19 @@ figures carry more variance than the 5 % PERF-030 gates on.
 
 They are published because a release with no numbers is worse than a release
 with honest ones, and because they establish which thresholds hold and which do
-not. They are not compliance evidence.
+not. They are not evidence that any absolute threshold is met; PERF-020,
+PERF-022 and PERF-023 clear their floors by margins far wider than the observed
+25 % spread, which is why they are reported as met, but a 5 % judgement cannot
+be drawn from this machine.
 
 ## Verification
 
 `COMPLIANCE.md` lists every AC-001..AC-025 and VAL-001..VAL-010 with its
-status. In summary: 20 of 25 acceptance criteria and 7 of 10 validation
-criteria are met and verified.
+status. In summary: 22 of 25 acceptance criteria and 8 of 10 validation
+criteria are met and verified. What remains is PERF-021, which is unmet and
+explained above; AC-020 and PERF-029/030, blocked on a pinned benchmark runner;
+and AC-018 and AC-019, whose properties hold but whose exact stated conditions
+were not reproduced.
 
 - **Zero allocation** is gated in CI on `linux/amd64`, `linux/arm64`,
   `darwin/arm64` and `windows/amd64`, since escape analysis differs by

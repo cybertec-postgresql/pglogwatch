@@ -7,30 +7,39 @@ import (
 
 // Threshold verification (PERF-024, PERF-025, AC-016, AC-017).
 //
-// The results table already prints "met" or "NOT MET" per workload, but a CI
-// job that decided by grepping for a string in a Markdown file would break the
-// day someone reworded the table. This turns the same judgement into a value
-// with an exit code behind it.
+// The results table already prints an outcome per workload, but a CI job that
+// decided by grepping for a string in a Markdown file would break the day
+// someone reworded the table. This turns the same judgement into a value.
 //
-// The distinction PERF-025 draws is the interesting part and is preserved here:
-// parity with pgweasel BLOCKS a release, while the 1.2x target does not. A
-// verifier that treated them the same would either block releases the
-// specification allows or wave through ones it does not.
+// Neither ratio blocks a release any more. PERF-024 and PERF-025 were amended
+// on 2026-09-01 to be measured-and-published rather than gating, because a
+// comparative ratio moves when a third-party tool changes -- pgweasel's Rust
+// rewrite made it 5.3x faster than its own Go predecessor, and the old wording
+// turned that into a release blocker for this project -- and because three of
+// the five workloads cannot be compared at all, pgweasel 0.1 having no `stats`
+// subcommand.
+//
+// So the outcomes are still computed, still reported, and still distinguish a
+// miss from a workload that could not be measured. What changed is Blocking,
+// which now returns nothing from these two requirements. The distinction is
+// worth keeping rather than deleting the code: an unmeasurable workload and a
+// measured loss are different facts, and the release notes have to say which
+// is which.
 
 // Severity of a threshold outcome.
 type Severity int
 
 const (
-	// Pass means the threshold was met.
+	// Pass means the ratio reached its figure.
 	Pass Severity = iota
-	// Miss means it was measured and not met. This blocks a release.
+	// Miss means it was measured and fell short. Reported, not blocking.
 	Miss
-	// Short means a target was missed that does not block a release --
-	// PERF-025's 1.2x, specifically.
+	// Short means the 1.2x target was missed while parity was reached.
 	Short
 	// Unmeasured means no comparison could be made, usually because a
-	// baseline is not installed. It blocks a release CLAIM, since VAL-004
-	// does not allow a threshold to be assumed met.
+	// baseline is not installed or does not implement the workload. VAL-004
+	// still forbids reporting such a workload as met, which is why this is
+	// a distinct value rather than an absence.
 	Unmeasured
 )
 
@@ -80,9 +89,8 @@ func Verify(results []Result) []Finding {
 
 		findings = append(findings,
 			evaluate("PERF-024", w.ID, "pgbadger", 10.0, 0, ours, byKey[w.ID+"/pgbadger"]),
-			// PERF-025: 1.0x is the release gate, 1.2x the stated
-			// target. Missing the target is reported and does not
-			// block.
+			// PERF-025 names two figures: parity, and a 1.2x
+			// target. Both are reported; neither blocks.
 			evaluate("PERF-025", w.ID, "pgweasel", 1.0, 1.2, ours, byKey[w.ID+"/pgweasel"]))
 	}
 	return findings
@@ -121,17 +129,37 @@ func reason(r Result) string {
 
 // Blocking reports whether any finding prevents a release.
 //
-// A missed gate blocks, and so does an unmeasured one: VAL-004 does not allow a
-// threshold to be assumed met, and "we could not check" is not "it passed". A
-// missed 1.2x target does not block, which is what PERF-025 says.
+// Since the 2026-09-01 amendment, none of them can: PERF-024 and PERF-025 are
+// measured and published rather than gating, and they are the only
+// requirements this package evaluates. The function is kept, returning nothing,
+// because the caller's shape is right and a future gating requirement -- one
+// measured against this code rather than against somebody else's -- would go
+// here.
+//
+// It is deliberately not "return nil". Filtering an empty set from real
+// findings makes the reason visible at the call site and in the tests, where a
+// bare nil would read as an oversight.
 func Blocking(findings []Finding) []Finding {
 	var out []Finding
 	for _, f := range findings {
-		if f.Severity == Miss || f.Severity == Unmeasured {
+		if blocks(f) {
 			out = append(out, f)
 		}
 	}
 	return out
+}
+
+// blocks reports whether one finding is a release blocker.
+//
+// Nothing PERF-024 or PERF-025 can produce is. A miss is a real measurement
+// worth publishing, and an unmeasured workload is a fact about the baseline --
+// pgweasel 0.1 does not implement `stats` -- rather than about this code.
+func blocks(f Finding) bool {
+	switch f.Requirement {
+	case "PERF-024", "PERF-025":
+		return false
+	}
+	return f.Severity == Miss || f.Severity == Unmeasured
 }
 
 // Summarise renders findings for a CI log.

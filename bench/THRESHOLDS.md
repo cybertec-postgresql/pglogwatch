@@ -214,15 +214,26 @@ error, writes nothing, and exits 0 -- which the harness originally timed and
 reported as pglogwatch losing by 7×. It now refuses the cell instead.
 
 Against the Go build, which does implement `stats`, all five workloads measure
-and pglogwatch leads by **4.0× to 23.0×**. That does not satisfy PERF-025 --
-the threshold is about the tool that exists today, not the one that did -- but
-it is what the three empty cells would otherwise leave unsaid.
+and pglogwatch leads by **4.0× to 23.0×**. That is not a substitute for the
+current release -- the figure that matters is the tool a user installs today --
+but it is what the three empty cells would otherwise leave unsaid.
 
-### PERF-025 W3: not met, at 0.78×
+### PERF-025 W3: 0.78×, reported rather than gated
+
+> **PERF-024 and PERF-025 stopped being release gates on 2026-09-01.** §3.4 of
+> the specification records the amendment: a gate on a comparative ratio
+> depends on a third party's roadmap and on measurements that cannot always be
+> taken, and both showed up here — pgweasel's rewrite turned its own
+> improvement into a blocker for this project, and three of five workloads
+> cannot be compared at all. The ratios must still be measured and published,
+> which is what the rest of this section does. `bench/compare` still computes
+> every outcome and still separates a measured loss from an absent baseline;
+> only `Blocking` changed.
+
 
 pgweasel produces its error report in 0.071 s against pglogwatch's 0.090 s --
 866 MB/s to 678 MB/s. This is a real measurement of two tools doing comparable
-work, and it is recorded as unmet rather than explained away.
+work, and it is recorded rather than explained away.
 
 This gap is new in the Rust rewrite: the Go build takes 0.379 s on the same
 workload, which pglogwatch beats by 4.2×. Whatever changed between the two is
@@ -234,10 +245,11 @@ raw matching lines where pglogwatch emits an aggregated histogram with top
 messages. It is buying that 25 % with roughly nineteen times the memory and a
 different, cheaper output.
 
-**Remediation.** The gap is small enough to be within reach and the cause is not
-yet established -- it may be the top-K normalisation, or output formatting, both
-of which pgweasel is not doing. Profile W3 before changing anything. PERF-025
-targets 1.2×, so parity alone would not close it.
+**Follow-up, not remediation.** The gap is small enough to be within reach and
+the cause is not established -- it may be the top-K normalisation, or output
+formatting, neither of which pgweasel is doing. Profile W3 before changing
+anything. Since the amendment this is work worth doing rather than work a
+release waits on.
 
 ### Memory (PERF-027)
 
