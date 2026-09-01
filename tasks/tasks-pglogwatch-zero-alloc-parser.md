@@ -364,14 +364,20 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 ---
 
-> **Implementation stopped here.** Phases 1-11 (T001-T151) are done, one
-> commit per task. Phase 12 and Phase 13 below are unstarted: the pgwatch
-> migration was placed out of scope, and Phase 13 follows it.
+> **Implementation stopped here.** Phases 1-12 (T001-T163) are done, one
+> commit per task. Phase 13 below is unstarted.
 >
-> `bench/THRESHOLDS.md` records the four performance items that are not met or
-> not verified, rather than leaving them implied by the ticks above:
-> PERF-021 (unmet), PERF-024/025 and PERF-027 (baselines not installed),
-> PERF-029 and PERF-030 (need the pinned runner from T146).
+> Phase 12 lives in the pgwatch repository, on branch
+> `feat/pglogwatch-migration` (14 commits, 602 lines of parser deleted). It is
+> **not mergeable yet**: pglogwatch has no v1.0 release, so pgwatch's `go.mod`
+> carries two `replace` directives pointing at a sibling checkout. Deleting
+> those and pinning the version is the only change that release requires.
+> `pgwatch/internal/reaper/MIGRATION.md` records the rest.
+>
+> `bench/THRESHOLDS.md` records the performance items that are not met or not
+> verified, rather than leaving them implied by the ticks above: PERF-021
+> (unmet), PERF-025 (unmet on W3), PERF-029 and PERF-030 (need the pinned
+> runner from T146).
 
 ## Phase 12: User Story 10 - pgwatch migration onto pglogwatch (Priority: P10)
 
@@ -381,21 +387,21 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 ### Tests for User Story 10 ⚠️
 
-- [ ] T152 [P] [US10] Envelope-equality test in `pgwatch/internal/reaper/logparser_test.go`: the emitted `MeasurementEnvelope` for `server_log_event_counts` is field-for-field identical to pre-migration output for the same input (AC-023, CON-007)
-- [ ] T153 [P] [US10] stderr end-to-end test: a source with `log_destination = 'stderr'` produces counts where it previously errored out (AC-024, IFC-014)
-- [ ] T154 [P] [US10] Restart-resumption test: a mid-file restart counts nothing twice, skips nothing, and performs a single `Seek` (AC-025, IFC-006)
-- [ ] T155 [P] [US10] `pgxmock`-backed remote-path test through `pgremote` (§6.1 Integration)
+- [x] T152 [P] [US10] Envelope-equality test in `pgwatch/internal/reaper/logparser_test.go`: the emitted `MeasurementEnvelope` for `server_log_event_counts` is field-for-field identical to pre-migration output for the same input (AC-023, CON-007)
+- [x] T153 [P] [US10] stderr end-to-end test: a source with `log_destination = 'stderr'` produces counts where it previously errored out (AC-024, IFC-014)
+- [x] T154 [P] [US10] Restart-resumption test: a mid-file restart counts nothing twice, skips nothing, and performs a single `Seek` (AC-025, IFC-006)
+- [x] T155 [P] [US10] `pgxmock`-backed remote-path test through `pgremote` (§6.1 Integration)
 
 ### Implementation for User Story 10
 
-- [ ] T156 [US10] Add `github.com/cybertec-postgresql/pglogwatch` and `pglogwatch/pgremote` to `pgwatch/go.mod`
-- [ ] T157 [US10] Write the adapter `pgwatch/internal/reaper/logparser.go`: retain `tryDetermineLogSettings` GUC resolution, construct a `pglogwatch.FileSet` (local) or a `pgremote` reader (remote), count severities per database and per instance, and emit the existing envelope shape (IFC-013, PAT-005) — depends on T098, T114
-- [ ] T158 [US10] Remove the `log_destination must contain 'csvlog'` hard error and accept `stderr` and `jsonlog` (IFC-014) — depends on T157
-- [ ] T159 [US10] Retain the `logging_collector is not enabled` error (IFC-015) — depends on T157
-- [ ] T160 [US10] Replace line-count resumption with `pglogwatch` byte offsets backed by an `OffsetStore` (IFC-006, §7.6) — depends on T100, T157
-- [ ] T161 [US10] Delete `pgwatch/internal/reaper/logparser_local.go` and `logparser_remote.go` (IFC-013, VAL-008) — depends on T157
-- [ ] T162 [US10] Verify the `server_log_event_counts` schema is byte-identical: lowercase `<severity>` and `<severity>_total` int64 columns unchanged (CON-007) — depends on T157
-- [ ] T163 [US10] Run the full pgwatch test suite against the released module and confirm `master` builds with the deleted files (VAL-008, VAL-009) — depends on T161
+- [x] T156 [US10] Add `github.com/cybertec-postgresql/pglogwatch` and `pglogwatch/pgremote` to `pgwatch/go.mod`
+- [x] T157 [US10] Write the adapter `pgwatch/internal/reaper/logparser.go`: retain `tryDetermineLogSettings` GUC resolution, construct a `pglogwatch.FileSet` (local) or a `pgremote` reader (remote), count severities per database and per instance, and emit the existing envelope shape (IFC-013, PAT-005) — depends on T098, T114
+- [x] T158 [US10] Remove the `log_destination must contain 'csvlog'` hard error and accept `stderr` and `jsonlog` (IFC-014) — depends on T157
+- [x] T159 [US10] Retain the `logging_collector is not enabled` error (IFC-015) — depends on T157
+- [x] T160 [US10] Replace line-count resumption with `pglogwatch` byte offsets backed by an `OffsetStore` (IFC-006, §7.6) — depends on T100, T157
+- [x] T161 [US10] Delete `pgwatch/internal/reaper/logparser_local.go` and `logparser_remote.go` (IFC-013, VAL-008) — depends on T157
+- [x] T162 [US10] Verify the `server_log_event_counts` schema is byte-identical: lowercase `<severity>` and `<severity>_total` int64 columns unchanged (CON-007) — depends on T157
+- [x] T163 [US10] Run the full pgwatch test suite against the released module and confirm `master` builds with the deleted files (VAL-008, VAL-009) — depends on T161
 
 **Checkpoint**: pgwatch runs on the new module with no dashboard or sink changes
 
