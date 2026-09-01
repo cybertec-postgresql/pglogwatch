@@ -364,8 +364,16 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 ---
 
-> **Implementation stopped here.** Phases 1-12 (T001-T163) are done, one
-> commit per task. Phase 13 below is unstarted.
+> **Phase 13 is done except for the tag.** T164-T176 and T178 are complete,
+> one commit per task; T177 waits for the release branch to merge, because a
+> version tag has to point at a commit on `main`.
+>
+> `COMPLIANCE.md` is the summary that matters: 20 of 25 acceptance criteria
+> and 7 of 10 validation criteria are met and verified. T178 is marked [~]
+> rather than [x] because it asked for confirmation that all of them pass,
+> and they do not -- AC-017 is measurably unmet, AC-020 and PERF-029/030 are
+> blocked on the runner T146 could not provision, and VAL-004 cannot be
+> claimed from an unpinned machine.
 >
 > Phase 12 lives in the pgwatch repository, on branch
 > `feat/pglogwatch-migration` (14 commits, 602 lines of parser deleted). It is
@@ -411,21 +419,21 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 **Purpose**: Release readiness for v1.0.0
 
-- [ ] T164 [P] Write `README.md`: quick start, borrowed-slice contract, the §9 examples and anti-patterns, and the comparative results table citing corpus version and machine (GUD-006, §9)
-- [ ] T165 [P] Freeze and review the public API: ≤ 40 exported identifiers in the root package, each with a doc comment (CON-006, VAL-007) — verified by T030
-- [ ] T166 [P] Verify `go list -deps` shows only standard-library packages (AC-021, VAL-002)
-- [ ] T167 [P] Verify `go test -bench . -benchmem ./...` reports `0 allocs/op` for every parsing benchmark on all four target platforms (VAL-003)
-- [ ] T168 [P] Verify `CGO_ENABLED=0` cross-builds for `linux/amd64`, `linux/arm64`, `darwin/arm64` and `windows/amd64` (AC-022, CON-001, PLT-002)
-- [ ] T169 [P] Raise statement coverage to ≥ 90 % root / ≥ 80 % overall, not satisfied by golden-file assertions alone (TST-010, VAL-006)
-- [ ] T170 [P] Accumulate ≥ 10 million fuzz executions with no crashers and archive the corpus (AC-009, VAL-005)
-- [ ] T171 [P] Scrub any real-world sample fixtures of identifiers before commit (TST-005, COM-002)
-- [ ] T172 [P] Audit for global mutable state and confirm all state lives in `Parser` / `Config` values (CON-002)
-- [ ] T173 [P] Audit that the library performs no logging and no filesystem access outside the requested reader constructors (CON-003, CON-005)
-- [ ] T174 Final BCE and escape-analysis sweep across all three hot loops, with the documenting comments GUD-003 requires (GUD-001, GUD-003)
-- [ ] T175 [P] Apply the repository's `modern-go` Go 1.26+ idiom guidance across the module (GUD-005)
-- [ ] T176 Write release notes publishing the §6.4 comparative table, citing `bench/MACHINE.md` and the corpus version, and stating the measured value, cause and remediation for any unmet threshold (VAL-004, VAL-010)
-- [ ] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006)
-- [ ] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001)
+- [x] T164 [P] Write `README.md`: quick start, borrowed-slice contract, the §9 examples and anti-patterns, and the comparative results table citing corpus version and machine (GUD-006, §9) — every Go sample compiled and every CLI line run before commit
+- [x] T165 [P] Freeze and review the public API: ≤ 40 exported identifiers in the root package, each with a doc comment (CON-006, VAL-007) — verified by T030. Exactly 40, no headroom; 22 are enumeration values. `bench/THRESHOLDS.md`'s claim of three free was corrected
+- [x] T166 [P] Verify `go list -deps` shows only standard-library packages (AC-021, VAL-002) — checked in both the default and `purego` builds
+- [x] T167 [P] Verify `go test -bench . -benchmem ./...` reports `0 allocs/op` for every parsing benchmark on all four target platforms (VAL-003) — the CI gate ran on one platform and now runs on all four
+- [x] T168 [P] Verify `CGO_ENABLED=0` cross-builds for `linux/amd64`, `linux/arm64`, `darwin/arm64` and `windows/amd64` (AC-022, CON-001, PLT-002) — the matrix now cross-vets too, so test files are type-checked per platform
+- [x] T169 [P] Raise statement coverage to ≥ 90 % root / ≥ 80 % overall, not satisfied by golden-file assertions alone (TST-010, VAL-006) — 92.0 % root, 81.8 % overall; 91.6 % with the golden tests skipped. `task cover` had only ever measured the root module
+- [x] T170 [P] Accumulate ≥ 10 million fuzz executions with no crashers and archive the corpus (AC-009, VAL-005) — 30 000 020 executions, 0 crashers (`FUZZING.md`). The corpus is regenerated rather than committed, per DAT-001's precedent
+- [x] T171 [P] Scrub any real-world sample fixtures of identifiers before commit (TST-005, COM-002) — nothing to scrub; every fixture is synthetic. A guard now fails on a routable address, an e-mail address or a public hostname
+- [x] T172 [P] Audit for global mutable state and confirm all state lives in `Parser` / `Config` values (CON-002) — clean; every package-scope var is a sentinel error or a read-only table. No linter: `gochecknoglobals` cannot tell those apart
+- [x] T173 [P] Audit that the library performs no logging and no filesystem access outside the requested reader constructors (CON-003, CON-005) — clean; enforced by two `depguard` rules
+- [x] T174 Final BCE and escape-analysis sweep across all three hot loops, with the documenting comments GUD-003 requires (GUD-001, GUD-003) — jsonlog's per-byte scanners hinted (−1.7 %, p ≈ 0.2, not significant); csvlog and stderr left alone; notes added to all three
+- [x] T175 [P] Apply the repository's `modern-go` Go 1.26+ idiom guidance across the module (GUD-005) — `sort` → `slices`/`maps`/`cmp`, `wg.Go`, `b.Loop`, `t.Context`, `SplitSeq`, `errors.Is`
+- [x] T176 Write release notes publishing the §6.4 comparative table, citing `bench/MACHINE.md` and the corpus version, and stating the measured value, cause and remediation for any unmet threshold (VAL-004, VAL-010) — `RELEASE-NOTES.md`. Re-measuring before publishing did not reproduce the recorded figures, so ranges are published and the spread is stated
+- [ ] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006) — the API is frozen and reviewed (T165); the tag itself waits for this branch to merge, since a tag must point at a commit on `main`
+- [~] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001) — NOT all pass. `COMPLIANCE.md` records each one: 20 of 25 AC and 7 of 10 VAL met. AC-017 is unmet, AC-020 is blocked on the runner, AC-018/AC-019 are partial, VAL-004 is unmet and VAL-008 waits on the tag
 
 ---
 
