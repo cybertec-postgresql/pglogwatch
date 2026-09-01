@@ -74,8 +74,22 @@ jobs:
         run: task test-race
 
   alloc:
-    name: allocation gates
-    runs-on: ubuntu-latest
+    name: allocation gates (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # VAL-003 asks for 0 allocs/op on all four target platforms, and an
+        # allocation is a property of the compiler and the architecture, not
+        # of the source: escape analysis differs between amd64 and arm64, and
+        # a syscall wrapper that allocates on Windows does not on Linux. A
+        # gate that runs on one of the four proves the property on one of the
+        # four, so each gets a runner of its own.
+        include:
+          - { target: linux/amd64, os: ubuntu-latest }
+          - { target: linux/arm64, os: ubuntu-24.04-arm }
+          - { target: darwin/arm64, os: macos-latest }
+          - { target: windows/amd64, os: windows-latest }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -84,6 +98,13 @@ jobs:
       # PERF-001 / AC-011: these tests fail if steady-state parsing allocates.
       # Run them without -race, which perturbs allocation accounting.
       - run: go test -run 'TestAlloc' -count=1 ./...
+      # VAL-003 in its own words: the benchmarks, with -benchmem, reporting
+      # 0 allocs/op. TestAlloc covers the same code through testing.AllocsPerRun
+      # and is the gate that fails; this step exists so that the number VAL-003
+      # names is visible in the log of every run rather than reconstructed from
+      # a passing test.
+      - name: benchmark allocation report (VAL-003)
+        run: go test -run '^$' -bench . -benchmem -benchtime 100x .
 
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
