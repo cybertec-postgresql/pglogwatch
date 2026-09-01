@@ -20,6 +20,18 @@ import (
 // thirty documented fields against a budget of forty and make the rule
 // meaningless. That reading is what keeps the number reviewable: forty things
 // a user has to learn the names of.
+//
+// The freeze review for v1.0.0 (T165) counted exactly 40, with no headroom,
+// and found that 22 of them are enumeration values: thirteen severities, four
+// formats and five flags. Those are three design decisions, not 22, so the
+// surface a reader actually has to learn is the other eighteen -- four
+// functions, ten types and four sentinel errors.
+//
+// That matters for what comes after the freeze. PKG-006 makes adding an
+// identifier a minor release and removing one a major, so the first post-v1.0
+// addition has to come with a decision about this budget: either the
+// enumeration values stop being counted individually, or the cap moves. Both
+// are changes to the rule and belong in the specification, not here.
 const maxExportedIdentifiers = 40
 
 func TestExportedAPIBudget(t *testing.T) {
