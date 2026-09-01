@@ -2,9 +2,10 @@ package pglogwatch_test
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -35,16 +36,9 @@ func TestExportedAPIBudget(t *testing.T) {
 // identifier must carry a doc comment. A doc comment on the enclosing
 // declaration counts, which is how a grouped const block documents its values.
 func TestExportedAPIDocumented(t *testing.T) {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", nonTestFile, parser.ParseComments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				checkDocumented(t, decl)
-			}
+	for _, file := range packageFiles(t, parser.ParseComments) {
+		for _, decl := range file.Decls {
+			checkDocumented(t, decl)
 		}
 	}
 }
@@ -79,17 +73,10 @@ func checkDocumented(t *testing.T, decl ast.Decl) {
 
 func exportedNames(t *testing.T) []string {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", nonTestFile, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var names []string
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				names = append(names, exportedFromDecl(decl)...)
-			}
+	for _, file := range packageFiles(t, 0) {
+		for _, decl := range file.Decls {
+			names = append(names, exportedFromDecl(decl)...)
 		}
 	}
 	return names
@@ -122,8 +109,26 @@ func exportedFromDecl(decl ast.Decl) []string {
 	return names
 }
 
-// nonTestFile selects the files that make up the package as a consumer sees
-// it: test files may export whatever they need.
-func nonTestFile(fi fs.FileInfo) bool {
-	return !strings.HasSuffix(fi.Name(), "_test.go")
+// packageFiles parses the files that make up the package as a consumer sees
+// it: go/build's GoFiles excludes test files, which may export whatever they
+// need, and applies build constraints for the current configuration, so a pair
+// like safe.go and unsafe.go contributes only the file that is actually built.
+// parser.ParseDir, which this replaced, is deprecated for ignoring those
+// constraints.
+func packageFiles(t *testing.T, mode parser.Mode) []*ast.File {
+	t.Helper()
+	pkg, err := build.ImportDir(".", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	files := make([]*ast.File, 0, len(pkg.GoFiles))
+	for _, name := range pkg.GoFiles {
+		file, err := parser.ParseFile(fset, filepath.Join(pkg.Dir, name), nil, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
+	}
+	return files
 }
