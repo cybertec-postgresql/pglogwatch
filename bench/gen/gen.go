@@ -84,6 +84,12 @@ type Config struct {
 	Records int
 	Start   time.Time
 	Mix     Mix
+
+	// Only restricts Write to one rendering: a format name ("stderr",
+	// "csvlog", "jsonlog") or a csvlog layout ("pg12", "pg13", "pg14").
+	// Empty writes all of them, which is what the versioned corpus needs
+	// and what a single-format measurement does not.
+	Only string
 }
 
 func (c *Config) normalize() {

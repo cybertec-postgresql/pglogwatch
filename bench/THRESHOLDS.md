@@ -99,30 +99,79 @@ such. Option 1 is the recommendation.
 
 ## Parallel scaling (PERF-029, AC-019)
 
-Eight workers over eight files, measured by `TestParallelScanScales` and
-`BenchmarkParallelScan`.
+**NOT MET, and the cause is in this code rather than in the machine.** An
+earlier revision of this file blamed memory bandwidth on a laptop. Two
+measurements say otherwise.
 
-| working set | speedup at 8 workers | verdict |
-|---|---:|---|
-| 8 MB (fits in L3) | **6.61×** | met — AC-019 asks for 6× |
-| 32 MB (exceeds L3) | **4.13×** | below 6× |
+| where | cores | speedup at 8 workers |
+|---|---:|---:|
+| development laptop (Ryzen 9 7940HS) | 8 physical / 16 logical | 4.07–4.33× |
+| a larger Linux server | 16 | **3.69×** |
 
-Scaling here is bounded by memory bandwidth, not by the sharding: single-worker
-throughput is roughly 800 MB/s, so eight-fold scaling needs about 6.4 GB/s
-sustained, which this laptop does not have while sharing 16 MB of L3 between
-eight cores.
+The bigger machine scaled *worse*. That alone disposes of the bandwidth
+explanation, and a second experiment confirms it: holding everything else
+constant and growing the working set makes scaling **better**, which is the
+opposite of what a bandwidth ceiling produces.
 
-This is the reason PERF-029 is specified against the reference machine, and it
-is why `TestParallelScanScales` asserts the threshold only when
-`PGLOGWATCH_BENCH_MACHINE=1`. Elsewhere it measures, logs both numbers, and
-skips. **Not yet verified**; it needs the pinned runner.
+| total working set | speedup at 8 workers |
+|---|---:|
+| 1.6 MB | 2.85× |
+| 6.4 MB | 3.91× |
+| 32 MB | 3.94× |
+| 128 MB | 4.30× |
+
+That curve is the signature of a fixed per-call cost that does not
+parallelise: small workloads are dominated by it, large ones amortise it, and
+none of them reaches linear.
+
+### The benchmark also compares unequal work
+
+`planShards` clamps the number of parts per source to the worker count:
+
+```go
+parts := int(size / minShardBytes)
+parts = min(max(parts, 1), workers)
+```
+
+So over the same eight 4 MiB inputs, a **1-worker run gets 8 shards and an
+8-worker run gets 64**. The parallel side pays eight times the per-shard setup
+-- a `Parser.Reset`, a seek, and a resync to the next record boundary -- and
+the ratio between them is not a pure measure of parallelism. Holding the shard
+count equal (sources small enough that `parts` is always 1) moves the figure
+from 4.32× to 4.75× on the laptop: worth about 10 %, and still short of
+PERF-029's 6×.
+
+Measured with the shard count held equal, the efficiency curve is:
+
+| workers | speedup | efficiency |
+|---:|---:|---:|
+| 2 | 1.94× | 0.97 |
+| 4 | 3.14× | 0.79 |
+| 8 | 4.75× | 0.59 |
+
+**Remediation.** Two separate pieces of work, in order.
+
+1. **Decouple the shard count from the worker count.** `--jobs 1` and
+   `--jobs 8` should divide the input the same way and differ only in how many
+   goroutines consume it. This is a correctness-of-measurement issue as much
+   as a performance one, and it is worth about 10 %.
+2. **Find the fixed per-call cost.** The working-set curve says it exists and
+   the shard experiment says it is not all per-shard setup. Profile
+   `ParallelScan` at 2, 4 and 8 workers on a large input before changing
+   anything else.
+
+Note also that `scanShard` calls `ensureFormat` per shard, which for
+`FormatAuto` **or** `FormatStderr` peeks up to `detectPeekBytes` (256 KiB) from
+the head of the source. These measurements use an explicit `FormatJSON` and so
+avoid it entirely; a stderr workload with auto-detected prefixes pays it 64
+times where the serial run pays it 8, and has not been measured.
 
 ## Memory (PERF-026 – PERF-028)
 
 | requirement | status |
 |---|---|
 | PERF-026 memory O(1) in input size | **met** — measured, see below |
-| PERF-026 under 64 MiB for a 10 GB input | **met in substance** — 563 KB at 400 000 records; the 10 GB scale itself was not run |
+| PERF-026 under 64 MiB for a 10 GB input | **met, measured at that scale** — 4188 kB peak RSS on a 10.17 GB input |
 | PERF-026 measured as peak **RSS** | **met** — 3.6–5.0 MB in the container, against a 64 MiB bound; not measurable on the development machine |
 | PERF-027 peak RSS under 25 % of pgbadger's, at most 1.25× pgweasel's | **met** — 4.2 MB against pgbadger's 66.2 MB (6 %) and pgweasel's 75.1 MB (0.06×); see below |
 | PERF-028 top-K aggregations O(K), not O(distinct) | **met** — flat across a 10× input in all four reports |
@@ -140,9 +189,28 @@ Twenty times the input, within 1 KB. That is the property PERF-026's RSS bound
 is a proxy for, measured directly.
 
 The bound itself is met with three orders of magnitude to spare: 563 KB against
-64 MiB. The 10 GB input in the requirement's wording was not run — it would take
-minutes and 10 GB of disk — but the parser holds one buffer and one record, and
-the scaling table above is what licenses the inference.
+64 MiB.
+
+**The 10 GB input in the requirement's wording has now been run**, on a Linux
+machine, via `bench/ac018-ac019.sh`:
+
+| item | value |
+|---|---|
+| input | 10 919 424 343 bytes (10.17 GB) of csvlog |
+| composition | 17 copies of a 2 000 000-record corpus |
+| peak RSS | **4188 kB (4.1 MiB)** against a 64 MiB bound |
+
+That is 6.4 % of the bound, and it agrees with the 4.2 MB the comparative
+harness measured on a 61 MB input — which is the point of running it. Two
+measurements 167 times apart in input size and within 5 % of each other in
+memory is PERF-026's O(1) property observed rather than inferred from the heap
+sampler alone.
+
+The input is a repeated corpus rather than 10 GB of distinct records, because
+the generator holds every event in memory and 33 million of them would need
+tens of gigabytes of RAM. PERF-026 bounds memory against input SIZE and the
+parser streams, so the path is the same; the distinction is recorded here
+rather than left for a reader to assume.
 
 **RSS is measured in the container, not on this machine.** Go exposes a child's
 peak resident set through `ru_maxrss`, which Windows does not provide, so
