@@ -76,8 +76,8 @@ func BenchmarkStderrFullParse(b *testing.B) {
 
 	b.SetBytes(int64(len(in)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		rd.Reset(in)
 		p.Reset(rd)
 		for p.Next() {
@@ -98,8 +98,8 @@ func BenchmarkStderrSeverityOnly(b *testing.B) {
 
 	b.SetBytes(int64(len(in)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		rd.Reset(in)
 		p.Reset(rd)
 		for p.Next() {
@@ -118,8 +118,8 @@ func BenchmarkStderrMultiline(b *testing.B) {
 
 	b.SetBytes(int64(len(in)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		rd.Reset(in)
 		p.Reset(rd)
 		for p.Next() {

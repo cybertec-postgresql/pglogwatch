@@ -25,7 +25,7 @@ const maxResyncLines = 1024
 const resyncPeekBytes = 8 << 10
 
 // Seek repositions the parser at a byte offset and resynchronises to the next
-// record boundary.
+// record boundary. It implements [io.Seeker].
 //
 // This is what makes resumption O(1). The implementation this module replaces
 // resumed by calling ReadString in a loop as many times as it had previously
@@ -33,9 +33,22 @@ const resyncPeekBytes = 8 << 10
 // multi-gigabyte log, every time (§7.6). Offsets come from [Record.Offset] and
 // are what an [OffsetStore] persists.
 //
+// The offset is interpreted according to whence: [io.SeekStart] means relative
+// to the start of the file, [io.SeekCurrent] relative to the current position,
+// and [io.SeekEnd] relative to the end. Note that SeekCurrent counts from the
+// parser's own position -- the offset the next [Parser.Next] would report --
+// not from the position of the underlying reader, which the buffer has already
+// read past.
+//
 // The offset need not be a record boundary. Seek discards the partial record it
 // lands in and continues from the next one, so a caller may seek to an
 // approximate position. Seeking to 0 needs no resynchronisation and does none.
+//
+// The returned offset is where the parser actually landed, which is the
+// boundary resynchronisation found and so is at or after the requested
+// position. It is the value to persist if the seek itself is a resumption
+// point. Seeking past the end is not an error: it returns the requested offset
+// and the next Next reports end of input.
 //
 // Detection state is kept: the format and log_line_prefix belong to the file,
 // not to the position within it, and re-detecting from the middle of a file
@@ -43,39 +56,69 @@ const resyncPeekBytes = 8 << 10
 // describe what this parser has read.
 //
 // It returns [ErrNotSeekable] if the underlying reader cannot seek.
-func (p *Parser) Seek(offset int64) error {
+func (p *Parser) Seek(offset int64, whence int) (int64, error) {
 	seeker, ok := p.buf.src.(io.Seeker)
 	if !ok {
-		return ErrNotSeekable
+		return 0, ErrNotSeekable
 	}
-	if offset < 0 {
-		return ErrNotSeekable
+	abs, err := p.resolveOffset(seeker, offset, whence)
+	if err != nil {
+		return 0, err
 	}
-	if _, err := seeker.Seek(offset, io.SeekStart); err != nil {
-		return err
+	if _, err := seeker.Seek(abs, io.SeekStart); err != nil {
+		return 0, err
 	}
 
 	src := p.buf.src
 	p.buf.reset(src)
-	p.buf.consumed = offset
+	p.buf.consumed = abs
 	p.rec.reset()
 	p.stats = Stats{}
 	p.err = nil
 	p.done = false
 	p.pendingFlags = 0
 
-	if offset == 0 {
-		return nil
+	if abs == 0 {
+		return 0, nil
 	}
 	// Resynchronisation asks "does this line start a record", which is a
 	// per-format question -- so the format has to be resolved first. It is
 	// not, when Seek is the first thing called on a parser, which is
 	// exactly what ParallelScan does for every shard after the first.
 	if !p.ensureFormat() {
-		return nil // nothing left to read
+		return p.buf.consumed, nil // nothing left to read
 	}
 	p.resync()
-	return nil
+	return p.buf.consumed, nil
+}
+
+// resolveOffset turns an (offset, whence) pair into an absolute position.
+//
+// io.SeekCurrent resolves against the parser's consumed count rather than
+// asking the underlying reader where it is. The two differ by however much the
+// buffer has read ahead, which is up to a full buffer and is not a quantity the
+// caller can predict, so delegating would make a relative seek land somewhere
+// arbitrary.
+func (p *Parser) resolveOffset(seeker io.Seeker, offset int64, whence int) (int64, error) {
+	var base int64
+	switch whence {
+	case io.SeekStart:
+	case io.SeekCurrent:
+		base = p.buf.consumed
+	case io.SeekEnd:
+		end, err := seeker.Seek(0, io.SeekEnd)
+		if err != nil {
+			return 0, err
+		}
+		base = end
+	default:
+		return 0, errBadWhence
+	}
+	abs := base + offset
+	if abs < 0 {
+		return 0, errNegativeOffset
+	}
+	return abs, nil
 }
 
 // resync advances to the next record boundary.

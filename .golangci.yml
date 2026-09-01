@@ -17,12 +17,6 @@ linters:
         # follows the specification's §4.2 listing so it can be reviewed
         # against the spec line by line.
         - fieldalignment
-        # stdmethods objects to Parser.Seek(int64) error, because io.Seeker
-        # spells Seek differently. The signature is fixed by §4.3 of the
-        # specification, and a Parser does not and must not satisfy io.Seeker
-        # -- it seeks the stream it is reading, it is not itself a stream --
-        # so there is no interface a caller could be confused into using.
-        - stdmethods
     revive:
       rules:
         - name: exported

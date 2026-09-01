@@ -2,6 +2,7 @@ package pglogwatch
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -51,7 +52,8 @@ func TestSeekResumesExactlyAtARecordBoundary(t *testing.T) {
 
 			for i := range offs {
 				p := New(bytes.NewReader(data), cfg)
-				require.NoError(t, p.Seek(offs[i]))
+				_, err := p.Seek(offs[i], io.SeekStart)
+				require.NoError(t, err)
 
 				var got []string
 				for p.Next() {
@@ -74,7 +76,8 @@ func TestSeekFromAnArbitraryOffsetResynchronises(t *testing.T) {
 
 	for off := range int64(len(data)) {
 		p := New(bytes.NewReader(data), Config{Format: FormatJSON})
-		require.NoError(t, p.Seek(off))
+		_, err := p.Seek(off, io.SeekStart)
+		require.NoError(t, err)
 
 		var got []string
 		for p.Next() {
@@ -108,7 +111,8 @@ func TestSeekIntoAMultiLineRecord(t *testing.T) {
 	require.Less(t, mid, offs[2])
 
 	p := New(bytes.NewReader(data), cfg)
-	require.NoError(t, p.Seek(mid))
+	_, err := p.Seek(mid, io.SeekStart)
+	require.NoError(t, err)
 	var got []string
 	for p.Next() {
 		got = append(got, string(p.Record().Message))
@@ -128,7 +132,8 @@ func TestSeekOffsetsAreStreamAbsoluteAfterSeek(t *testing.T) {
 	require.Len(t, offs, 3)
 
 	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
-	require.NoError(t, p.Seek(offs[1]))
+	_, err := p.Seek(offs[1], io.SeekStart)
+	require.NoError(t, err)
 	require.True(t, p.Next())
 	assert.Equal(t, offs[1], p.Record().Offset)
 	require.True(t, p.Next())
@@ -140,7 +145,8 @@ func TestSeekToZeroReadsEverything(t *testing.T) {
 	_, msgs := recordOffsets(t, data, Config{Format: FormatJSON})
 
 	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
-	require.NoError(t, p.Seek(0))
+	_, err := p.Seek(0, io.SeekStart)
+	require.NoError(t, err)
 	var got []string
 	for p.Next() {
 		got = append(got, string(p.Record().Message))
@@ -152,7 +158,8 @@ func TestSeekToZeroReadsEverything(t *testing.T) {
 func TestSeekPastEndIsClean(t *testing.T) {
 	data := fixture(t, "json/basic.json")
 	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
-	require.NoError(t, p.Seek(int64(len(data))+1000))
+	_, err := p.Seek(int64(len(data))+1000, io.SeekStart)
+	require.NoError(t, err)
 	assert.False(t, p.Next())
 	assert.NoError(t, p.Err())
 }
@@ -162,8 +169,10 @@ func TestSeekOnANonSeekableReader(t *testing.T) {
 	// and saying so plainly is more useful than reading and discarding
 	// gigabytes to simulate it.
 	p := New(&countingReader{r: strings.NewReader("{}\n")}, Config{Format: FormatJSON})
-	assert.ErrorIs(t, p.Seek(10), ErrNotSeekable)
-	assert.ErrorIs(t, p.Seek(-1), ErrNotSeekable)
+	_, err := p.Seek(10, io.SeekStart)
+	assert.ErrorIs(t, err, ErrNotSeekable)
+	_, err = p.Seek(-1, io.SeekStart)
+	assert.ErrorIs(t, err, ErrNotSeekable)
 }
 
 func TestSeekKeepsDetectionState(t *testing.T) {
@@ -177,7 +186,83 @@ func TestSeekKeepsDetectionState(t *testing.T) {
 	require.Equal(t, FormatStderr, format)
 	require.NotEmpty(t, prefix)
 
-	require.NoError(t, p.Seek(int64(len(data)/2)))
+	_, err := p.Seek(int64(len(data)/2), io.SeekStart)
+	require.NoError(t, err)
 	assert.Equal(t, format, p.DetectedFormat())
 	assert.Equal(t, prefix, p.DetectedPrefix())
+}
+
+func TestSeekRejectsBadArguments(t *testing.T) {
+	// Argument errors are distinguishable from ErrNotSeekable: the reader
+	// here can seek perfectly well, and reporting otherwise would send a
+	// caller looking at the wrong thing.
+	data := fixture(t, "json/basic.json")
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+
+	_, err := p.Seek(-1, io.SeekStart)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotSeekable)
+
+	_, err = p.Seek(-int64(len(data))-1, io.SeekEnd)
+	require.Error(t, err)
+
+	_, err = p.Seek(0, 42)
+	require.Error(t, err)
+}
+
+func TestSeekWhenceCurrentIsRelativeToTheParser(t *testing.T) {
+	// The buffer reads ahead, so the underlying reader sits well past the
+	// parser's own position. Resolving SeekCurrent against the READER would
+	// land arbitrarily far along; it has to resolve against consumed.
+	data := fixture(t, "json/basic.json")
+	offs, msgs := recordOffsets(t, data, Config{Format: FormatJSON})
+	require.Greater(t, len(offs), 2)
+
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+	require.True(t, p.Next()) // consumes record 0; parser now sits at offs[1]
+
+	got, err := p.Seek(offs[2]-offs[1], io.SeekCurrent)
+	require.NoError(t, err)
+	assert.Equal(t, offs[2], got)
+
+	require.True(t, p.Next())
+	assert.Equal(t, msgs[2], string(p.Record().Message))
+}
+
+func TestSeekWhenceEndLandsAtEndOfInput(t *testing.T) {
+	data := fixture(t, "json/basic.json")
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+
+	got, err := p.Seek(0, io.SeekEnd)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(data)), got)
+	assert.False(t, p.Next())
+	assert.NoError(t, p.Err())
+}
+
+func TestSeekReturnsTheResynchronisedOffset(t *testing.T) {
+	// The returned offset is where the parser LANDED, not what was asked
+	// for. That is the whole value of the return: a caller seeking to an
+	// approximate position learns the real boundary.
+	data := fixture(t, "json/basic.json")
+	offs, msgs := recordOffsets(t, data, Config{Format: FormatJSON})
+	require.Greater(t, len(offs), 2)
+
+	mid := offs[1] + (offs[2]-offs[1])/2 // deliberately inside record 1
+	require.Greater(t, mid, offs[1])
+
+	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
+	got, err := p.Seek(mid, io.SeekStart)
+	require.NoError(t, err)
+	assert.Equal(t, offs[2], got, "resync should report the boundary it found")
+
+	require.True(t, p.Next())
+	assert.Equal(t, msgs[2], string(p.Record().Message))
+	assert.Equal(t, offs[2], p.Record().Offset)
+}
+
+// TestParserSatisfiesIOSeeker is the point of the signature: a Parser can be
+// handed to anything that takes an io.Seeker.
+func TestParserSatisfiesIOSeeker(t *testing.T) {
+	var _ io.Seeker = (*Parser)(nil)
 }
