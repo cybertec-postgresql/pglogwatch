@@ -58,8 +58,17 @@ caller will read.
 1. **A `Config.Fields` mask.** The caller declares which fields it wants and
    the scanners skip the rest. This is the smallest change that makes PERF-021
    meaningful, and it directly serves pgwatch, whose entire use is
-   severity-and-database counting. It adds one exported identifier, and CON-006
-   currently has three of forty free.
+   severity-and-database counting.
+
+   It needs API room it no longer has. An earlier revision of this file said
+   CON-006 had three of forty identifiers free; the T165 freeze review counted
+   the surface at exactly 40, so there are none. A `Fields` type plus its
+   values would take the count over the cap, and the cap is a release
+   condition (VAL-007) rather than a preference. Either the mask reuses
+   `Flags`, or the enumeration constants come out of the budget -- 22 of the
+   40 are severity, format and flag values, which are one design decision
+   each rather than 22, and `api_test.go` records why they are counted the way
+   they are.
 2. **Lazy field extraction.** `Record` would expose methods rather than fields.
    This is a larger API change than PKG-006 should absorb after v1.0 and would
    lose the borrowed-slice simplicity, so it is worth considering only before
