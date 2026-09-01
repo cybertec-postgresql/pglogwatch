@@ -61,6 +61,13 @@ func Write(dir string, cfg Config) (*Manifest, error) {
 	}
 
 	write := func(name, format, layout string, fn func(*os.File) (Written, error)) error {
+		// Only skips renderings the caller did not ask for. A corpus at
+		// benchmark scale is five files of comparable size, and a
+		// caller measuring one format has no use for the other four --
+		// at 10 GB that is 40 GB of disk it did not want.
+		if cfg.Only != "" && cfg.Only != format && cfg.Only != layout {
+			return nil
+		}
 		path := filepath.Join(dir, name)
 		f, err := os.Create(path) //nolint:gosec // path is built from dir
 		if err != nil {

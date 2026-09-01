@@ -24,10 +24,11 @@ func main() {
 		manifest = flag.String("manifest", "corpus-v1.manifest", "manifest path")
 		seed     = flag.Uint64("seed", 20260830, "generator seed")
 		records  = flag.Int("records", 200000, "number of log events")
+		only     = flag.String("only", "", `write one rendering only: a format ("stderr", "csvlog", "jsonlog") or a csvlog layout ("pg12", "pg13", "pg14")`)
 	)
 	flag.Parse()
 
-	m, err := gen.Write(*dir, gen.Config{Seed: *seed, Records: *records})
+	m, err := gen.Write(*dir, gen.Config{Seed: *seed, Records: *records, Only: *only})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "corpus:", err)
 		os.Exit(1)

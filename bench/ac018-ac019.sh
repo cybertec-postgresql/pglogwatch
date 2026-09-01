@@ -15,6 +15,7 @@
 #   ./bench/ac018-ac019.sh              # both
 #   ./bench/ac018-ac019.sh ac019        # just the scaling measurement (fast)
 #   SIZE_GB=2 ./bench/ac018-ac019.sh    # a smaller AC-018, for a dry run
+#   DISTINCT=1 ./bench/ac018-ac019.sh   # generate the whole input, no repeats
 #   SKIP_PGBADGER=1 ./bench/ac018-ac019.sh
 #
 # Requirements: Go 1.26+, GNU time (/usr/bin/time -v), 8+ cores, and for the
@@ -22,11 +23,18 @@
 # it the absolute 64 MiB bound is still checked and the 25 % comparison is
 # reported as not measured, which is what VAL-004 requires instead of an
 # assumed result.
+#
+# DISTINCT=1 generates SIZE_GB of distinct records instead of repeating a
+# smaller corpus. The generator holds every event in memory -- roughly 2 GB of
+# RAM per GB of csvlog -- so 10 GB wants about 20 GB free on top of the disk.
+# It is the stronger measurement, and the script picks it automatically when
+# the machine has the memory for it.
 set -euo pipefail
 
 SIZE_GB="${SIZE_GB:-10}"
 WORK="${WORK:-${TMPDIR:-/tmp}/pglogwatch-ac018}"
 SKIP_PGBADGER="${SKIP_PGBADGER:-0}"
+DISTINCT="${DISTINCT:-auto}"
 WHAT="${1:-all}"
 
 # Criteria that did not hold. Collected rather than exited on, so that one
@@ -108,27 +116,54 @@ peak RSS is the quantity AC-018 is stated in and the shell builtin cannot report
 	local seed="$WORK/seed.csv" big="$WORK/big.csv"
 	local want=$((SIZE_GB * 1024 * 1024 * 1024))
 
-	# The generator holds every event in memory, so generating 10 GB of
-	# records directly would need tens of gigabytes of RAM. Generate a
-	# seed and repeat it instead: AC-018 is about how memory behaves as
-	# the INPUT grows, and the parser streams, so a repeated corpus
-	# exercises the same path. State it in the output rather than let a
-	# reader assume 10 GB of distinct records.
-	if [ ! -s "$seed" ]; then
-		say "generating the seed corpus (2 000 000 records)"
-		(cd bench && go run ./cmd/corpus -dir "$WORK/corpus" \
-			-manifest "$WORK/corpus.manifest" -records 2000000 >/dev/null)
-		cp "$WORK/corpus/postgresql-pg14.csv" "$seed"
+	# Two ways to reach SIZE_GB, and the difference is worth being explicit
+	# about. Generating the whole thing gives distinct records, which is
+	# what the requirement literally says; repeating a smaller corpus gives
+	# the same input SIZE over the same streaming path, which is what
+	# PERF-026 actually bounds. The first needs the generator to hold every
+	# event in memory -- roughly 2 GB per GB of csvlog -- so it is chosen
+	# only when the machine has the headroom.
+	local mem_kb avail_gb records reps=0
+	mem_kb="$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+	avail_gb=$((mem_kb / 1024 / 1024))
+	records=$((SIZE_GB * 3200000)) # ~321 bytes per csvlog record
+	if [ "$DISTINCT" = "auto" ]; then
+		if [ "$avail_gb" -ge $((SIZE_GB * 2 + 4)) ]; then
+			DISTINCT=1
+		else
+			DISTINCT=0
+		fi
+		say "available memory ${avail_gb} GB -> DISTINCT=$DISTINCT (override to force)"
 	fi
 
-	local seed_size
-	seed_size="$(stat -c %s "$seed" 2>/dev/null || stat -f %z "$seed")"
-	local reps=$(((want + seed_size - 1) / seed_size))
-
-	if [ ! -s "$big" ] || [ "$(stat -c %s "$big" 2>/dev/null || stat -f %z "$big")" -lt "$want" ]; then
-		say "building a ${SIZE_GB} GB input: ${reps} copies of a ${seed_size}-byte corpus"
-		: >"$big"
-		for _ in $(seq "$reps"); do cat "$seed" >>"$big"; done
+	if [ "$DISTINCT" = "1" ]; then
+		if [ ! -s "$big" ]; then
+			say "generating ${records} distinct records (~${SIZE_GB} GB of csvlog)"
+			# -only pg14: without it the generator also writes the
+			# stderr, jsonlog and two other csvlog renderings, which
+			# at this scale is four times the disk for input nothing
+			# here reads.
+			(cd bench && go run ./cmd/corpus -dir "$WORK/corpus" \
+				-manifest "$WORK/corpus.manifest" \
+				-records "$records" -only pg14 >/dev/null)
+			mv "$WORK/corpus/postgresql-pg14.csv" "$big"
+		fi
+	else
+		if [ ! -s "$seed" ]; then
+			say "generating the seed corpus (2 000 000 records)"
+			(cd bench && go run ./cmd/corpus -dir "$WORK/corpus" \
+				-manifest "$WORK/corpus.manifest" \
+				-records 2000000 -only pg14 >/dev/null)
+			cp "$WORK/corpus/postgresql-pg14.csv" "$seed"
+		fi
+		local seed_size
+		seed_size="$(stat -c %s "$seed" 2>/dev/null || stat -f %z "$seed")"
+		reps=$(((want + seed_size - 1) / seed_size))
+		if [ ! -s "$big" ] || [ "$(stat -c %s "$big" 2>/dev/null || stat -f %z "$big")" -lt "$want" ]; then
+			say "building a ${SIZE_GB} GB input: ${reps} copies of a ${seed_size}-byte corpus"
+			: >"$big"
+			for _ in $(seq "$reps"); do cat "$seed" >>"$big"; done
+		fi
 	fi
 	local big_size
 	big_size="$(stat -c %s "$big" 2>/dev/null || stat -f %z "$big")"
@@ -177,9 +212,15 @@ peak RSS is the quantity AC-018 is stated in and the shell builtin cannot report
 		printf 'PERF-027  not measured -- VAL-004 does not allow it to be assumed met\n'
 	fi
 
-	printf '\nInput was %s copies of a 2 000 000-record corpus, not %s GB of\n' "$reps" "$SIZE_GB"
-	printf 'distinct records. AC-018 measures memory against input SIZE and the\n'
-	printf 'parser streams, so the path is the same -- but say so when quoting this.\n'
+	if [ "$DISTINCT" = "1" ]; then
+		printf '\nInput was %s distinct records. This is the measurement AC-018\n' "$records"
+		printf 'states literally.\n'
+	else
+		printf '\nInput was %s copies of a 2 000 000-record corpus, not %s GB of\n' "$reps" "$SIZE_GB"
+		printf 'distinct records. AC-018 measures memory against input SIZE and the\n'
+		printf 'parser streams, so the path is the same -- but say so when quoting\n'
+		printf 'this, or re-run with DISTINCT=1 on a machine with the memory.\n'
+	fi
 	printf '\nWorking files are in %s; remove them when done.\n' "$WORK"
 }
 
