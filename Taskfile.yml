@@ -38,12 +38,32 @@ tasks:
         vars: {MODULE: '{{.ITEM}}', CMD: '{{.GO}} test -race ./...'}
 
   cover:
-    desc: Statement coverage; VAL-006 wants >= 90% root, >= 80% overall.
+    desc: 'Statement coverage; VAL-006 wants >= 90% root, >= 80% overall.'
+    # Per module, then summed. `./...` does not cross a nested go.mod, so a
+    # single run at the root measures the parser and reports it as though it
+    # were the whole repository -- which is how VAL-006's "overall" figure
+    # went unmeasured until the release check.
     cmds:
-      - '{{.GO}} test -coverprofile=coverage.out ./...'
-      - '{{.GO}} tool cover -func=coverage.out | tail -1'
-    generates:
-      - coverage.out
+      - for: {var: MODULES}
+        task: cover-module
+        vars: {MODULE: '{{.ITEM}}'}
+      - task: cover-total
+
+  cover-module:
+    internal: true
+    dir: '{{.MODULE}}'
+    cmds:
+      - '{{.GO}} test -covermode=set -coverprofile=coverage.out ./...'
+      - '{{.GO}} tool cover -func=coverage.out | tail -1 | sed "s|^total:|{{.MODULE}}|"'
+
+  cover-total:
+    internal: true
+    # Column 2 of a profile line is the statement count and column 3 is how
+    # many times it ran, so the repository total is a plain sum over every
+    # module's profile. `go tool cover` cannot do this: it resolves source
+    # paths within a single module.
+    cmds:
+      - cat coverage.out compress/coverage.out pgremote/coverage.out bench/coverage.out cmd/pglogwatch/coverage.out | awk '!/^mode:/ { t += $2; if ($3 > 0) c += $2 } END { print "OVERALL", int(1000*c/t)/10 "% of statements (" c "/" t ")" }'
 
   fuzz:
     desc: Short local run of every fuzz target. CI runs these for 30m (TST-007).
