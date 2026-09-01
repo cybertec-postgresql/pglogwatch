@@ -9,7 +9,36 @@ linters:
     - unused
     - misspell
     - revive
+    - depguard
   settings:
+    depguard:
+      rules:
+        # CON-003: the library does not log. Diagnostics are a return value,
+        # a Stats counter, or a callback.
+        no-logging:
+          files: ["!$test"]
+          deny:
+            - pkg: log
+              desc: "CON-003: the library must not log"
+            - pkg: log/slog
+              desc: "CON-003: the library must not log"
+        # CON-005: FileSet may walk a log directory; nothing else may reach
+        # the disk. A caller who hands New an io.Reader gets a parser that
+        # opens nothing.
+        no-filesystem:
+          files:
+            - "!$test"
+            - "!**/source_file.go"
+            - "!**/fileset_open.go"
+            - "!**/parallel.go"
+            - "!**/compress/**"
+            - "!**/bench/**"
+            - "!**/cmd/**"
+          deny:
+            - pkg: os
+              desc: "CON-005: filesystem access belongs in the reader constructors"
+            - pkg: path/filepath
+              desc: "CON-005: filesystem access belongs in the reader constructors"
     govet:
       enable-all: true
       disable:
