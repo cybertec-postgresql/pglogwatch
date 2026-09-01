@@ -353,9 +353,9 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 - [x] T143 [US9] Emit the results table recording tool version, corpus version, machine spec, format, input size, wall-clock, MB/s, peak RSS and output artifact size (TST-013) — depends on T142
 - [x] T144 [US9] Document the pgbadger configuration used for W1–W4 and state explicitly what each tool produced; never present unequal outputs as equal (TST-012) — depends on T142
 - [x] T145 [US9] Add `make bench-compare` reproducing every README performance claim, citing corpus version and reference machine (GUD-006, VAL-004) — depends on T142
-- [x] T146 [US9] Provision the pinned self-hosted benchmark runner with `pgbadger` and `pgweasel` at pinned versions (INF-002, INF-003, SVC-002)
-- [x] T147 [US9] Add `.github/workflows/bench.yml` on the self-hosted runner comparing against the committed baseline with `benchstat`, failing on a > 5 % ns/op regression or any allocation gain (PERF-030, TST-008, AC-020)
-- [x] T148 [US9] Add `.github/workflows/bench-compare.yml` running weekly and on release tags, publishing the results table as a build artifact (TST-009)
+- [ ] T146 [US9] Provision the pinned self-hosted benchmark runner with `pgbadger` and `pgweasel` at pinned versions (INF-002, INF-003, SVC-002) — NOT done: the repository has no registered self-hosted runner. `bench/RUNNER.md` is the procedure; it is hardware and an organisation account, not code.
+- [~] T147 [US9] ~~Add `.github/workflows/bench.yml` on the self-hosted runner comparing against the committed baseline with `benchstat`, failing on a > 5 % ns/op regression or any allocation gain (PERF-030, TST-008, AC-020)~~ — REMOVED: the pinned runner (T146) does not exist, so the job only ever queued. PERF-030 is gated by hand per `bench/THRESHOLDS.md`.
+- [~] T148 [US9] ~~Add `.github/workflows/bench-compare.yml` running weekly and on release tags, publishing the results table as a build artifact (TST-009)~~ — REMOVED with T147, and for the same reason.
 - [x] T149 [US9] Measure and record the throughput floors: csvlog full parse ≥ 250 MB/s, csvlog severity-only ≥ 800 MB/s, stderr ≥ 200 MB/s, jsonlog ≥ 150 MB/s (PERF-020..023, AC-015)
 - [x] T150 [US9] Verify ≥ 10× `pgbadger -j 1` and ≥ 1.0× `pgweasel` (target 1.2×) for every W1–W5 workload (PERF-024, PERF-025, AC-016, AC-017)
 - [x] T151 [US9] Verify peak RSS < 64 MiB on a 10 GB input, < 25 % of pgbadger's and ≤ 1.25× pgweasel's (PERF-026, PERF-027, AC-018)

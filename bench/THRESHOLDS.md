@@ -241,7 +241,15 @@ architectural rather than an artefact of the language.
 
 ## Regression gate (PERF-030)
 
-Implemented in `.github/workflows/bench.yml` and **not yet exercised**: it
-targets the pinned runner, and there is not one. The workflow includes a second
-job that says so on every pull request, so an unrun gate cannot be mistaken for
-a passing one.
+Not run in CI, and no longer attempted there. PERF-030's 5 % gate is only
+meaningful on the pinned runner (INF-002, SVC-002), and there is not one; on a
+shared runner the gate fails on variance rather than on regressions. The
+benchmark workflows have been removed from GitHub Actions rather than left to
+queue forever against a runner that never arrives, since a job stuck in
+`queued` reads as "not finished" when it means "never ran".
+
+The gate is therefore a manual step: run `make bench` on the machine described
+in `bench/MACHINE.md` and compare against the committed `bench/baseline.txt`
+with `benchstat`. Until that is done for a given change, the change has NOT
+been checked for a performance regression and no PERF-0xx threshold may be
+reported as met (VAL-004).

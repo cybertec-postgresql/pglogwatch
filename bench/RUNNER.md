@@ -5,8 +5,9 @@ This file is the procedure. **The runner does not exist yet** — nothing in thi
 repository can create it, because it is hardware and an organisation account,
 not code.
 
-Until it exists, `bench/MACHINE.md` stays unfilled, the two benchmark workflows
-sit unrun, and no PERF-0xx threshold may be reported as met (VAL-004).
+Until it exists, `bench/MACHINE.md` stays unfilled, both benchmarks stay manual
+(they were removed from GitHub Actions rather than queue forever against a runner
+that does not exist), and no PERF-0xx threshold may be reported as met (VAL-004).
 
 ## What is needed
 
