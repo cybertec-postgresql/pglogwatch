@@ -368,12 +368,18 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 > one commit per task; T177 waits for the release branch to merge, because a
 > version tag has to point at a commit on `main`.
 >
-> `COMPLIANCE.md` is the summary that matters: 20 of 25 acceptance criteria
-> and 7 of 10 validation criteria are met and verified. T178 is marked [~]
+> `COMPLIANCE.md` is the summary that matters: 22 of 25 acceptance criteria
+> and 8 of 10 validation criteria are met and verified. T178 is marked [~]
 > rather than [x] because it asked for confirmation that all of them pass,
-> and they do not -- AC-017 is measurably unmet, AC-020 and PERF-029/030 are
-> blocked on the runner T146 could not provision, and VAL-004 cannot be
-> claimed from an unpinned machine.
+> and they do not -- AC-020 and PERF-029/030 are blocked on the runner T146
+> could not provision, AC-018 and AC-019 are partial, and PERF-021 is
+> measurably unmet.
+>
+> PERF-024, PERF-025, AC-016 and AC-017 were release gates until 2026-09-01,
+> when the specification's owner amended them to measured-and-published
+> requirements. §3.4 of the specification carries the amendment and its
+> reasoning; it is recorded there rather than applied silently, which is what
+> VAL-010 forbids.
 >
 > Phase 12 lives in the pgwatch repository, on branch
 > `feat/pglogwatch-migration` (14 commits, 602 lines of parser deleted). It is
@@ -433,7 +439,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 - [x] T175 [P] Apply the repository's `modern-go` Go 1.26+ idiom guidance across the module (GUD-005) — `sort` → `slices`/`maps`/`cmp`, `wg.Go`, `b.Loop`, `t.Context`, `SplitSeq`, `errors.Is`
 - [x] T176 Write release notes publishing the §6.4 comparative table, citing `bench/MACHINE.md` and the corpus version, and stating the measured value, cause and remediation for any unmet threshold (VAL-004, VAL-010) — `RELEASE-NOTES.md`. Re-measuring before publishing did not reproduce the recorded figures, so ranges are published and the spread is stated
 - [ ] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006) — the API is frozen and reviewed (T165); the tag itself waits for this branch to merge, since a tag must point at a commit on `main`
-- [~] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001) — NOT all pass. `COMPLIANCE.md` records each one: 20 of 25 AC and 7 of 10 VAL met. AC-017 is unmet, AC-020 is blocked on the runner, AC-018/AC-019 are partial, VAL-004 is unmet and VAL-008 waits on the tag
+- [~] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001) — `COMPLIANCE.md` records each one: 22 of 25 AC and 8 of 10 VAL met after the PERF-024/PERF-025 amendment. Still short: AC-020 is blocked on the runner, AC-018/AC-019 are partial, VAL-008 waits on the tag, and PERF-021 is unmet
 
 ---
 

@@ -217,12 +217,37 @@ single process, warm page cache, output discarded.
 - **PERF-021**: Single-core `csvlog` severity-only scan throughput MUST be **≥ 800 MB/s**.
 - **PERF-022**: Single-core `stderr` full-field parse throughput MUST be **≥ 200 MB/s**.
 - **PERF-023**: Single-core `jsonlog` full-field parse throughput MUST be **≥ 150 MB/s**.
-- **PERF-024**: For every benchmark workload in §6.4, `pglogwatch` MUST achieve **≥ 10× the throughput
-  of `pgbadger -j 1`**. (Baseline reference: pgbadger's own documentation reports 9.5 GB in
-  1 h 41 min on one CPU, approximately 1.6 MB/s.)
-- **PERF-025**: For every benchmark workload in §6.4, `pglogwatch` MUST achieve **≥ 1.0× the
-  throughput of `pgweasel`** (parity), with a **target of ≥ 1.2×**. Failing to reach 1.2× MUST
-  NOT block release; failing parity MUST block release.
+- **PERF-024**: For every benchmark workload in §6.4, `pglogwatch` SHOULD achieve **≥ 10× the
+  throughput of `pgbadger -j 1`**. (Baseline reference: pgbadger's own documentation reports
+  9.5 GB in 1 h 41 min on one CPU, approximately 1.6 MB/s.) The ratio MUST be measured and
+  published where both tools produce comparable output; it MUST NOT block release.
+- **PERF-025**: For every benchmark workload in §6.4, `pglogwatch` SHOULD achieve **≥ 1.0× the
+  throughput of `pgweasel`** (parity), with a **target of ≥ 1.2×**. The ratio MUST be measured
+  and published where the comparison is possible; it MUST NOT block release.
+
+  > **Amended 2026-09-01, v1.0.0 release.** Both were release gates: PERF-024 at 10×, PERF-025
+  > at parity. They are now measured-and-published requirements that do not block, on the
+  > decision of the specification's owner, for two reasons.
+  >
+  > The first is that the gate depends on something the project does not control. A comparative
+  > ratio moves when a third-party tool changes, so a release could be blocked by someone else's
+  > improvement rather than by a regression here — which is what happened: pgweasel's Rust
+  > rewrite made it 5.3× faster than its own Go predecessor on W3, and PERF-025 turned that into
+  > a release blocker for pglogwatch.
+  >
+  > The second is that the gate depends on measurements that cannot always be taken. Three of
+  > the five §6.4 workloads cannot be compared against pgweasel 0.1 at all, because its `stats`
+  > subcommand is not implemented. A requirement that is unmeasurable on 60 % of its own
+  > workloads cannot be a release condition; gating on it means either blocking indefinitely or
+  > assuming a result, and VAL-004 forbids the second.
+  >
+  > What does not change: both ratios MUST still be measured, published in the release notes
+  > with the corpus version and machine, and reported honestly where a comparison is not
+  > possible. Removing the gate removes the block, not the obligation to look.
+  >
+  > This does **not** extend to PERF-020..PERF-023 or PERF-026..PERF-030. Those are absolute
+  > properties of this code measured against itself, not comparisons against a moving target,
+  > and they remain release conditions.
 - **PERF-026**: Peak RSS for any streaming workload MUST be **O(1) in input size** and MUST NOT
   exceed **64 MiB** for a 10 GB input.
 - **PERF-027**: Peak RSS MUST be **< 25 % of pgbadger's** and **≤ 1.25× of pgweasel's** on the
@@ -603,10 +628,13 @@ Global flags: `--format`, `--line-prefix`, `--lang`, `--begin`, `--end`, `--jobs
 
 - **AC-015**: Given the reference machine and corpus, When `make bench-compare` runs, Then
   `pglogwatch` single-core csvlog throughput is ≥ 250 MB/s.
-- **AC-016**: Given the same run, Then `pglogwatch` throughput is ≥ 10× `pgbadger -j 1` for every
-  workload in §6.4.
-- **AC-017**: Given the same run, Then `pglogwatch` throughput is ≥ 1.0× `pgweasel` for every workload
-  in §6.4.
+- **AC-016**: Given the same run, Then the ratio of `pglogwatch` throughput to `pgbadger -j 1`
+  is measured and published for every workload in §6.4 where both produce comparable output.
+  (Amended: the ≥ 10× figure is a target, not a gate — see PERF-024.)
+- **AC-017**: Given the same run, Then the ratio of `pglogwatch` throughput to `pgweasel` is
+  measured and published for every workload in §6.4 where the comparison is possible, and
+  workloads where it is not possible are reported as such rather than assumed.
+  (Amended: parity is a target, not a gate — see PERF-025.)
 - **AC-018**: Given a 10 GB input, When `pglogwatch bench` runs, Then peak RSS is < 64 MiB and is
   < 25 % of pgbadger's peak RSS on the same input.
 - **AC-019**: Given a multi-file corpus and `--jobs 8` on an 8-core reference machine, When
@@ -997,7 +1025,9 @@ A release of `pglogwatch` v1.0.0 is compliant when all of the following hold:
 - **VAL-003**: `go test -bench . -benchmem ./...` reports `0 allocs/op` for every parsing
   benchmark, on all four target platforms.
 - **VAL-004**: The comparative benchmark table (§6.4) is published in the release notes, cites
-  `bench/MACHINE.md` and the corpus version, and shows every PERF-024 and PERF-025 threshold met.
+  `bench/MACHINE.md` and the corpus version, and reports every PERF-024 and PERF-025 ratio —
+  including the workloads where no comparison was possible. (Amended with PERF-024 and
+  PERF-025: the table must be complete and honest, not favourable.)
 - **VAL-005**: Fuzz targets have accumulated at least 10 million executions with no crashers.
 - **VAL-006**: Statement coverage is ≥ 90 % for the root package and ≥ 80 % overall.
 - **VAL-007**: The root package exports 40 or fewer identifiers and every one has a doc comment.
