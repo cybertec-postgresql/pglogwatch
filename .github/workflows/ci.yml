@@ -27,9 +27,11 @@ jobs:
             # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
             (cd "$m" && go vet -stdmethods=false ./...) || exit 1
           done
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # v8 is the first action release that runs golangci-lint v2. .golangci.yml
+      # is written to the v2 schema (top-level `version`, `formatters`,
+      # `linters.settings`), which v1 rejects outright at `config verify`.
+      # No `version:` input: the action then installs the latest v2 itself.
+      - uses: golangci/golangci-lint-action@v8
 
   test:
     name: test -race
