@@ -139,7 +139,7 @@ func scanShard(ctx context.Context, p *Parser, s shard, worker int,
 	// it here costs one peek per shard and fixes it.
 	p.ensureFormat()
 
-	if err := p.Seek(s.start); err != nil {
+	if _, err := p.Seek(s.start, io.SeekStart); err != nil {
 		return err
 	}
 

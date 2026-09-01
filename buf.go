@@ -227,10 +227,7 @@ func (b *buf) grow() bool {
 	if len(b.data) >= b.max {
 		return false
 	}
-	size := max(len(b.data)*2, b.initial)
-	if size > b.max {
-		size = b.max
-	}
+	size := min(max(len(b.data)*2, b.initial), b.max)
 	grown := make([]byte, size)
 	copy(grown, b.data[:b.w])
 	b.data = grown

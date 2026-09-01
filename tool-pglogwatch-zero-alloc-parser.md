@@ -429,7 +429,7 @@ func (p *Parser) Stats() Stats
 func (p *Parser) DetectedFormat() Format
 func (p *Parser) DetectedPrefix() string
 func (p *Parser) Reset(r io.Reader)         // reuse buffers for a new stream
-func (p *Parser) Seek(offset int64) error   // resync to the next record boundary
+func (p *Parser) Seek(offset int64, whence int) (int64, error) // io.Seeker; resyncs to a boundary
 ```
 
 - **IFC-001**: `Next()` MUST return `false` exactly once at end of input; further calls MUST keep
@@ -476,6 +476,11 @@ type OffsetStore interface {
 - **IFC-006**: Offsets MUST be **byte offsets**, not line counts. (The current pgwatch
   implementation re-reads and discards lines to resume, which is O(n) per restart; byte offsets
   make resumption O(1) and compose with the offset-based remote read path.)
+- **IFC-008**: `Parser.Seek` MUST match the `io.Seeker` signature, so a `Parser` may be passed
+  wherever that interface is accepted. `io.SeekCurrent` MUST resolve against the parser's own
+  consumed offset rather than the underlying reader's position, which the buffer has read past.
+  The returned offset MUST be the position resynchronisation settled on, so a caller seeking to
+  an approximate position learns the real record boundary.
 - **IFC-007**: The default in-memory `OffsetStore` MUST be bounded (default 2500 entries,
   matching pgwatch's `maxTrackedFiles`) with LRU eviction.
 

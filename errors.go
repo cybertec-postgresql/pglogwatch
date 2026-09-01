@@ -65,3 +65,13 @@ var (
 	errBadJSON        = newParseError("pglogwatch: malformed JSON object")
 	errUnterminated   = newParseError("pglogwatch: unterminated quoted field")
 )
+
+// Seek argument errors. Unexported for the same reason as the reasons above,
+// and additionally because they report a caller mistake rather than bad input:
+// a program that passes a whence it did not mean has a bug to fix, not an
+// error to branch on. They are not malformed-line errors and so do not satisfy
+// errors.Is(err, ErrMalformedLine).
+var (
+	errBadWhence      = &parseError{msg: "pglogwatch: invalid whence for Seek"}
+	errNegativeOffset = &parseError{msg: "pglogwatch: Seek to a negative offset"}
+)
