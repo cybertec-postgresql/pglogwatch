@@ -11,6 +11,37 @@ import (
 // segments must match, escape segments consume as much as their kind says
 // their value occupies. What is left over is the severity and the message.
 
+// Performance notes for this path (GUD-001, GUD-002, GUD-003).
+//
+// Measured on the fixtures at 1 MB, AMD Ryzen 9 7940HS / windows/amd64 / Go
+// 1.26.5: full parse 367 MB/s, severity-only 381 MB/s, multi-line 409 MB/s,
+// all 0 allocs/op. PERF-022's floor is 200 MB/s. This is the slowest of the
+// three formats, and structurally so: csvlog and jsonlog have their field
+// boundaries written into them, while a stderr line has to be matched against
+// a template segment by segment before any field exists. Multi-line records
+// measure FASTER per byte because a continuation line is re-sliced onto an
+// already-open field and skips the prefix walk entirely.
+//
+// Bounds-check elimination (GUD-001). Twenty-five checks survive in this file.
+// They are per-segment and per-line, not per-byte: the scanners here call
+// bytes.Index, bytes.IndexByte and the digit scanners rather than walking bytes
+// in Go. Verified with -gcflags=-d=ssa/check_bce/debug=1.
+//
+// Escape analysis (GUD-003). This is the path with the one genuine hazard, and
+// it is physicalLines. It returns a closure, which -gcflags=-m reports as
+// escaping at its definition -- read alone, that is one allocation per record.
+// It is not, because parseStderrInto consumes it with range-over-func and the
+// compiler inlines both the iterator and its yield function at that call site;
+// -m confirms "can inline physicalLines" and "can inline
+// (*Parser).parseStderrInto-range1". Assigning the iterator to a variable, or
+// passing it anywhere, would stop that and put an allocation in every stderr
+// record. TestAllocStderrMultiline is what would catch it.
+//
+// Everything else here is reported as "does not escape" or as leaking a
+// parameter into a returned sub-slice, which is the borrowing contract. The
+// string(label) conversion in the continuation switch stays on the stack
+// because it is only ever compared; assigning it to a variable would allocate.
+
 // scanPrefix matches the template against line and returns the remainder --
 // the "SEVERITY:  message" part -- filling r's prefix-derived fields.
 //
