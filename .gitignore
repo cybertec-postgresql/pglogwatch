@@ -8,6 +8,14 @@
 *.dylib
 *.test
 
+# The same binaries under a non-Windows GOOS, which carry no extension and so
+# are not matched above. A cross-build for the release matrix drops one of
+# these next to the source, and `git add -A` then stages a 4 MB file that
+# reviews as a single unreadable line.
+/cmd/pglogwatch/pglogwatch
+/bench/cmd/compare/compare
+/bench/cmd/corpus/corpus
+
 # Coverage and profiling output.
 coverage.out
 *.prof
