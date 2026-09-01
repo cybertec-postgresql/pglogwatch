@@ -2,9 +2,10 @@ package gen
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -127,12 +128,7 @@ func (m *Manifest) MarshalText() ([]byte, error) {
 	}
 
 	sb.WriteString("\n# severity histogram: the counts every tool must agree on (AC-010)\n")
-	keys := make([]string, 0, len(m.Severity))
-	for k := range m.Severity {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(m.Severity)) {
 		fmt.Fprintf(&sb, "severity %s %s\n", k, strconv.FormatInt(m.Severity[k], 10))
 	}
 	return []byte(sb.String()), nil

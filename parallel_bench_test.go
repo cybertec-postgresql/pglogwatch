@@ -45,8 +45,7 @@ func benchmarkParallelScan(b *testing.B, workers int) {
 	var count atomic.Int64
 	b.SetBytes(total)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		err := ParallelScan(b.Context(), srcs, Config{Format: FormatJSON}, workers,
 			func(_ int, r *Record) error {
 				count.Add(int64(r.Severity))
@@ -108,8 +107,7 @@ func TestParallelScanScales(t *testing.T) {
 	run := func(workers int) float64 {
 		var n atomic.Int64
 		res := testing.Benchmark(func(b *testing.B) {
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				_ = ParallelScan(b.Context(), srcs, Config{Format: FormatJSON}, workers,
 					func(_ int, r *Record) error {
 						n.Add(int64(r.Severity))

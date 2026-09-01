@@ -18,7 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -303,7 +303,7 @@ func csvFiles(dir string) []string {
 	if err != nil {
 		return nil
 	}
-	sort.Strings(matches)
+	slices.Sort(matches)
 	return matches
 }
 
@@ -370,7 +370,7 @@ func measure(ctx context.Context, cfg Config, tool Tool, w Workload, args []stri
 		}
 		r.OutputKB = got.outBytes / 1024
 	}
-	sort.Float64s(times)
+	slices.Sort(times)
 	r.MinSec = times[0]
 	r.MaxSec = times[len(times)-1]
 	// TST-011 asks for the median, not the mean: one scheduling hiccup in

@@ -2,6 +2,7 @@ package pglogwatch
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,7 @@ func FuzzParseRecord(f *testing.F) {
 		// deliberately fatal. The fuzzer found this distinction within
 		// three seconds, which is a fair summary of why this target
 		// exists.
-		if err := p.Err(); err != nil && err != ErrBadLinePrefix {
+		if err := p.Err(); err != nil && !errors.Is(err, ErrBadLinePrefix) {
 			t.Fatalf("unexpected fatal error %v", err)
 		}
 	})

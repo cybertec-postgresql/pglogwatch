@@ -1,7 +1,9 @@
 package main
 
 import (
-	"sort"
+	"cmp"
+	"maps"
+	"slices"
 	"strconv"
 )
 
@@ -125,15 +127,9 @@ func (c *counter) evictSmallest() {
 // order changes between runs over the same log cannot be diffed, and diffing
 // two reports is most of what these are used for.
 func (c *counter) top(n int) []*counted {
-	out := make([]*counted, 0, len(c.groups))
-	for _, g := range c.groups {
-		out = append(out, g)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].count != out[j].count {
-			return out[i].count > out[j].count
-		}
-		return out[i].key < out[j].key
+	out := slices.Collect(maps.Values(c.groups))
+	slices.SortFunc(out, func(a, b *counted) int {
+		return cmp.Or(cmp.Compare(b.count, a.count), cmp.Compare(a.key, b.key))
 	})
 	if len(out) > n {
 		out = out[:n]
@@ -143,15 +139,9 @@ func (c *counter) top(n int) []*counted {
 
 // bySlowest returns the n groups with the largest worst value.
 func (c *counter) bySlowest(n int) []*counted {
-	out := make([]*counted, 0, len(c.groups))
-	for _, g := range c.groups {
-		out = append(out, g)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].worst != out[j].worst {
-			return out[i].worst > out[j].worst
-		}
-		return out[i].key < out[j].key
+	out := slices.Collect(maps.Values(c.groups))
+	slices.SortFunc(out, func(a, b *counted) int {
+		return cmp.Or(cmp.Compare(b.worst, a.worst), cmp.Compare(a.key, b.key))
 	})
 	if len(out) > n {
 		out = out[:n]
@@ -163,15 +153,9 @@ func (c *counter) bySlowest(n int) []*counted {
 // what finds the query that is individually unremarkable and collectively
 // ruinous.
 func (c *counter) byTotal(n int) []*counted {
-	out := make([]*counted, 0, len(c.groups))
-	for _, g := range c.groups {
-		out = append(out, g)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].total != out[j].total {
-			return out[i].total > out[j].total
-		}
-		return out[i].key < out[j].key
+	out := slices.Collect(maps.Values(c.groups))
+	slices.SortFunc(out, func(a, b *counted) int {
+		return cmp.Or(cmp.Compare(b.total, a.total), cmp.Compare(a.key, b.key))
 	})
 	if len(out) > n {
 		out = out[:n]

@@ -95,10 +95,8 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	// Shards are handed out round-robin rather than in contiguous blocks, so
 	// that a set of files of unequal size does not leave one worker with all
 	// the large ones.
-	for w := range workers {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
+	for worker := range workers {
+		wg.Go(func() {
 			p := New(nil, cfg) // one parser per worker, reused across its shards
 			for i := worker; i < len(shards); i += workers {
 				if ctx.Err() != nil {
@@ -109,7 +107,7 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 					return
 				}
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 

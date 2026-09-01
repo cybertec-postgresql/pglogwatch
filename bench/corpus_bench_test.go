@@ -48,8 +48,7 @@ func benchmarkCorpus(b *testing.B, file string, cfg pglogwatch.Config, touch fun
 
 	b.SetBytes(info.Size())
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		f, err := os.Open(path) //nolint:gosec // generated corpus
 		if err != nil {
 			b.Fatal(err)

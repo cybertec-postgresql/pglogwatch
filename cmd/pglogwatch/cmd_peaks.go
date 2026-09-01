@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"flag"
-	"sort"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/cybertec-postgresql/pglogwatch"
@@ -69,17 +71,11 @@ func runPeaks(o *options) error {
 		return err
 	}
 
-	all := make([]*bucketStat, 0, len(buckets))
-	for _, b := range buckets {
-		all = append(all, b)
-	}
+	all := slices.Collect(maps.Values(buckets))
 	// Busiest first, then by time so equal buckets read chronologically and
 	// the output is stable between runs.
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].records != all[j].records {
-			return all[i].records > all[j].records
-		}
-		return all[i].start.Before(all[j].start)
+	slices.SortFunc(all, func(a, b *bucketStat) int {
+		return cmp.Or(cmp.Compare(b.records, a.records), a.start.Compare(b.start))
 	})
 	if len(all) > o.top {
 		all = all[:o.top]
