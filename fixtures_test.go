@@ -128,6 +128,14 @@ func TestFixturesCarryNoRealIdentifiers(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// testdata/fuzz holds the fuzzer's corpus: machine-generated
+		// mutations of the seeds in fuzz_test.go, not samples anyone
+		// pasted in. A byte sequence in there that happens to look like
+		// an address came out of the mutator, and flagging it would
+		// train a reader to ignore this test.
+		if strings.Contains(filepath.ToSlash(path), "/fuzz/") {
+			return nil
+		}
 		body, err := os.ReadFile(path) //nolint:gosec // a fixture path from the walk
 		if err != nil {
 			return err
