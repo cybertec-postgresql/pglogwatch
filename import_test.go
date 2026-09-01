@@ -19,15 +19,28 @@ import (
 // dependency graph in order to prove the dependency graph is empty would be a
 // self-defeating test. The go command is already required to run tests at all.
 func TestImportsAreStandardLibraryOnly(t *testing.T) {
-	deps := goListDeps(t, modulePath)
-	for _, pkg := range deps {
-		// go list -deps names the package itself last.
-		if pkg == modulePath || strings.HasPrefix(pkg, modulePath+"/") {
-			continue
+	// Both build configurations, because they compile different files.
+	// PKG-007's purego fallback selects safe.go instead of unsafe.go, and
+	// a dependency added to the file the default build does not compile
+	// would be invisible to a single-configuration check while still
+	// reaching every consumer who sets the tag.
+	for _, tags := range []string{"", "purego"} {
+		name := "default"
+		if tags != "" {
+			name = tags
 		}
-		if !isStdlib(pkg) {
-			t.Errorf("root package depends on non-stdlib package %q; PKG-002 requires an empty dependency graph", pkg)
-		}
+		t.Run(name, func(t *testing.T) {
+			for _, pkg := range goListDeps(t, modulePath, tags) {
+				// go list -deps names the package itself last.
+				if pkg == modulePath || strings.HasPrefix(pkg, modulePath+"/") {
+					continue
+				}
+				if !isStdlib(pkg) {
+					t.Errorf("root package depends on non-stdlib package %q under tags %q; "+
+						"PKG-002 requires an empty dependency graph", pkg, tags)
+				}
+			}
+		})
 	}
 }
 
@@ -47,21 +60,27 @@ const modulePath = "github.com/cybertec-postgresql/pglogwatch"
 //     the whole point of the hand-written scanner (PERF-005).
 func TestForbiddenImports(t *testing.T) {
 	forbidden := []string{"net", "os/exec", "database/sql", "encoding/json"}
-	deps := goListDeps(t, modulePath)
-	seen := make(map[string]bool, len(deps))
-	for _, d := range deps {
-		seen[d] = true
-	}
-	for _, f := range forbidden {
-		if seen[f] {
-			t.Errorf("root package imports %q, forbidden by CON-004", f)
+	for _, tags := range []string{"", "purego"} {
+		deps := goListDeps(t, modulePath, tags)
+		seen := make(map[string]bool, len(deps))
+		for _, d := range deps {
+			seen[d] = true
+		}
+		for _, f := range forbidden {
+			if seen[f] {
+				t.Errorf("root package imports %q under tags %q, forbidden by CON-004", f, tags)
+			}
 		}
 	}
 }
 
-func goListDeps(t *testing.T, pkg string) []string {
+func goListDeps(t *testing.T, pkg, tags string) []string {
 	t.Helper()
-	out, err := exec.Command("go", "list", "-deps", pkg).Output()
+	args := []string{"list", "-deps"}
+	if tags != "" {
+		args = append(args, "-tags", tags)
+	}
+	out, err := exec.Command("go", append(args, pkg)...).Output()
 	if err != nil {
 		t.Skipf("go list unavailable: %v", err)
 	}
