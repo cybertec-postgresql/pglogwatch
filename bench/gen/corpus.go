@@ -110,7 +110,7 @@ func Write(dir string, cfg Config) (*Manifest, error) {
 func (m *Manifest) MarshalText() ([]byte, error) {
 	var sb strings.Builder
 	sb.WriteString("# pglogwatch benchmark corpus manifest (TST-003, DAT-001).\n")
-	sb.WriteString("# The payload is NOT committed; regenerate it with: make corpus\n")
+	sb.WriteString("# The payload is NOT committed; regenerate it with: task corpus\n")
 	sb.WriteString("# A benchmark figure must cite this version (TST-013, GUD-006).\n\n")
 	fmt.Fprintf(&sb, "version %s\n", m.Version)
 	fmt.Fprintf(&sb, "seed %d\n", m.Seed)

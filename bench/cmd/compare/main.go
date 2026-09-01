@@ -1,10 +1,10 @@
 // Command compare runs the §6.4 comparative benchmark and writes the results
 // table (TST-011, TST-013).
 //
-// Run through the Makefile:
+// Run through the Taskfile:
 //
-//	make corpus         # generate the corpus first
-//	make bench-compare  # measure against whatever is installed
+//	task corpus         # generate the corpus first
+//	task bench-compare  # measure against whatever is installed
 //
 // A tool that is not installed is reported as not measured rather than failing
 // the run, so the harness is usable in a checkout as well as on the pinned

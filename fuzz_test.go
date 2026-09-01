@@ -16,7 +16,7 @@ import (
 // then hands byte slices, offsets and lengths to a caller. Every one of those
 // is an opportunity to slice out of range.
 //
-// Run locally with `make fuzz`; CI runs each target for 30 minutes nightly
+// Run locally with `task fuzz`; CI runs each target for 30 minutes nightly
 // (TST-007), toward AC-009's ten million executions.
 
 // seedFuzzFromFixtures adds every committed fixture to a target's corpus, so

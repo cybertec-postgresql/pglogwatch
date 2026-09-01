@@ -489,7 +489,7 @@ func peakRSSKB(cmd *exec.Cmd) int64 {
 func corpusBytes(dir string) (int64, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, fmt.Errorf("reading corpus %s: %w (run: make corpus)", dir, err)
+		return 0, fmt.Errorf("reading corpus %s: %w (run: task corpus)", dir, err)
 	}
 	var total int64
 	for _, e := range entries {
@@ -503,7 +503,7 @@ func corpusBytes(dir string) (int64, error) {
 		total += info.Size()
 	}
 	if total == 0 {
-		return 0, fmt.Errorf("corpus %s is empty (run: make corpus)", dir)
+		return 0, fmt.Errorf("corpus %s is empty (run: task corpus)", dir)
 	}
 	return total, nil
 }

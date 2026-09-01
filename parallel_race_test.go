@@ -16,7 +16,7 @@ import (
 // and that has to be demonstrated under the race detector rather than
 // asserted in a doc comment.
 //
-// Run as part of `make test-race`; the detector is what makes these tests
+// Run as part of `task test-race`; the detector is what makes these tests
 // meaningful, and without it they merely check the counts again.
 
 func TestParallelScanIsRaceFree(t *testing.T) {

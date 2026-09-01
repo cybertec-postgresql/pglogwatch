@@ -17,7 +17,7 @@ import (
 //
 // A benchmark figure cites a corpus version (TST-013) and must be reproducible
 // (GUD-006). Neither means anything unless the same seed produces byte-identical
-// output -- otherwise two people running "make corpus" measure different things
+// output -- otherwise two people running "task corpus" measure different things
 // and compare the results anyway.
 
 func TestSameSeedProducesIdenticalOutput(t *testing.T) {

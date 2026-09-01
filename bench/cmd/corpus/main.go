@@ -1,9 +1,9 @@
 // Command corpus generates the benchmark corpus (TST-001, TST-003).
 //
-// Run through the Makefile:
+// Run through the Taskfile:
 //
-//	make corpus                 # the default corpus
-//	make corpus RECORDS=5000000 # a larger one, same seed
+//	task corpus                 # the default corpus
+//	task corpus RECORDS=5000000 # a larger one, same seed
 //
 // The payload is written to bench/corpus/ and is not committed; the manifest
 // is (DAT-001).

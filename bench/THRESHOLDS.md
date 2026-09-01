@@ -145,7 +145,7 @@ at once.
 
 | item | value |
 |---|---|
-| image | `bench/Dockerfile` -- `make compare-docker` |
+| image | `bench/Dockerfile` -- `task bench:compare-docker` |
 | pgbadger | 12.0 (Debian bookworm package) |
 | pgweasel | 0.1 (Rust), commit `f2abfe42ac04316bfe889a2ea7ddd658fc5f26ec` |
 | pgweasel-go | last Go build, commit `231132a5d5175cfc00434a25b8f6a5772307399e` |
@@ -248,7 +248,7 @@ benchmark workflows have been removed from GitHub Actions rather than left to
 queue forever against a runner that never arrives, since a job stuck in
 `queued` reads as "not finished" when it means "never ran".
 
-The gate is therefore a manual step: run `make bench` on the machine described
+The gate is therefore a manual step: run `task bench` on the machine described
 in `bench/MACHINE.md` and compare against the committed `bench/baseline.txt`
 with `benchstat`. Until that is done for a given change, the change has NOT
 been checked for a performance regression and no PERF-0xx threshold may be

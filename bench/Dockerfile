@@ -32,4 +32,8 @@ COPY --from=weasel-rs /src/target/release/pgweasel /usr/local/bin/pgweasel
 COPY --from=weasel-rs /commit /pgweasel.commit
 COPY --from=weasel-go /pgweasel-go /usr/local/bin/pgweasel-go
 COPY --from=weasel-go /commit /pgweasel-go.commit
+# The run inside the container is driven by bench/Taskfile.yml, so the image
+# needs the task runner; the golang base image supplies the toolchain to build
+# it and already has /go/bin on PATH.
+RUN go install github.com/go-task/task/v3/cmd/task@latest
 WORKDIR /work

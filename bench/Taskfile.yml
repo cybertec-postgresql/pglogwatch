@@ -1,0 +1,57 @@
+# https://taskfile.dev
+#
+# Included by the root Taskfile as `bench:`; also usable on its own from this
+# directory (`task compare`).
+version: '3'
+
+vars:
+  GO: '{{.GO | default "go"}}'
+  RECORDS: '{{.RECORDS | default 200000}}'
+  SEED: '{{.SEED | default 20260830}}'
+  CORPUS: '{{.CORPUS | default "corpus"}}'
+  # RUNS defaults to 10, which is TST-011's minimum. WARMUP runs are discarded
+  # so the first measured run is not the one that faults the corpus into page
+  # cache.
+  RUNS: '{{.RUNS | default 10}}'
+  WARMUP: '{{.WARMUP | default 3}}'
+  # GATE=-gate makes an unmet or unmeasured threshold exit 2, which is what a
+  # release job wants and a developer running this locally does not.
+  GATE: '{{.GATE | default ""}}'
+  IMAGE: '{{.IMAGE | default "pglogwatch-bench"}}'
+
+tasks:
+  corpus:
+    desc: Regenerate the benchmark corpus from its seed (TST-003, DAT-001).
+    # The payload is not committed; the manifest is.
+    cmds:
+      - '{{.GO}} run ./cmd/corpus -dir {{.CORPUS}} -records {{.RECORDS}} -seed {{.SEED}} -manifest corpus-v1.manifest'
+
+  compare:
+    desc: Run pglogwatch against pgbadger and pgweasel (TST-011, §6.4).
+    cmds:
+      - '{{.GO}} run ./cmd/compare -corpus {{.CORPUS}} -runs {{.RUNS}} -warmup {{.WARMUP}} -out RESULTS.md {{.GATE}}'
+
+  clean:
+    desc: Remove the generated corpus.
+    cmds:
+      - rm -rf {{.CORPUS}}
+
+  compare-docker:
+    desc: Run the comparison in a throwaway container.
+    # The baselines are not installable everywhere -- pgbadger is Perl,
+    # pgweasel needs a Rust toolchain for the current release and a Go one for
+    # the last Go build -- and PERF-027 is stated in peak RSS, which Go reads
+    # through ru_maxrss and Windows does not provide. The container supplies
+    # all three and a platform that can measure them.
+    #
+    # It is NOT the pinned runner (INF-002), so figures from it may not be
+    # published as meeting a threshold (VAL-004).
+    cmds:
+      - docker build -t {{.IMAGE}} .
+      - >-
+        docker run --rm -v "{{.TASKFILE_DIR}}/..:/src:ro" {{.IMAGE}} sh -c '
+        cp -r /src/. /work/ && cd /work && rm -rf .git &&
+        (cd cmd/pglogwatch && go build -o /usr/local/bin/pglogwatch .) &&
+        cd bench && task corpus RECORDS={{.RECORDS}} &&
+        BENCH_VERSION_PGWEASEL_GO="Go build @$(cat /pgweasel-go.commit)"
+        task compare RUNS={{.RUNS}} WARMUP={{.WARMUP}} && cat RESULTS.md'

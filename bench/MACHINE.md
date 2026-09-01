@@ -14,7 +14,7 @@ threshold is bounded by memory bandwidth rather than by the code at all.
 self-hosted runner; T146 of the implementation plan is the task that acquires
 it. Until then:
 
-- the comparative table (`make bench-compare`) runs anywhere and reports what
+- the comparative table (`task bench-compare`) runs anywhere and reports what
   it could measure, marking the rest as not measured;
 - no figure produced on an unpinned machine may be published as meeting a
   PERF-0xx threshold (VAL-004);
@@ -69,10 +69,10 @@ neighbour.
 ## Reproducing a published figure
 
 ```bash
-make corpus                                  # regenerate corpus-v1 from its seed
+task corpus                                  # regenerate corpus-v1 from its seed
 PGLOGWATCH_BENCH_MACHINE_NAME=<hostname> \
 PGLOGWATCH_BENCH_MACHINE=1 \
-  make bench-compare                         # measure and write bench/RESULTS.md
+  task bench-compare                         # measure and write bench/RESULTS.md
 ```
 
 The results table names the corpus version and this file. If either differs from

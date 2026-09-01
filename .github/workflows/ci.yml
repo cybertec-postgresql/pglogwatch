@@ -61,12 +61,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+      # `task test-race` walks every module; the runner has no task binary.
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       # The race detector needs cgo on some platforms; scope the override to
       # this step only so the build matrix still proves CGO_ENABLED=0 works.
       - name: go test -race
         env:
           CGO_ENABLED: "1"
-        run: make test-race
+        run: task test-race
 
   alloc:
     name: allocation gates

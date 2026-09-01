@@ -56,7 +56,7 @@ echo "PGLOGWATCH_BENCH_MACHINE_NAME=$(hostname)" >> .env
 ## Then
 
 1. Fill in every row of `bench/MACHINE.md` and record the date.
-2. Run `make corpus && make bench-compare` once by hand and check the results
+2. Run `task corpus && task bench-compare` once by hand and check the results
    table names the machine and the corpus version.
 3. Commit `bench/baseline.txt` from a clean run so the PERF-030 gate has
    something to compare against. Until that file exists the gate creates it and

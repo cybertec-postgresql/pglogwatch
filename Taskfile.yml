@@ -1,0 +1,112 @@
+# https://taskfile.dev
+#
+# Run `task --list` for the targets a developer is expected to use.
+version: '3'
+
+vars:
+  # `GO=go1.25 task test` still works: an undefined var resolves from the
+  # environment, so the default only applies when nothing was passed.
+  GO: '{{.GO | default "go"}}'
+  # Every go.mod in the repository. `./...` does not cross a nested go.mod, so
+  # a single run at the root would silently leave four of the five unchecked.
+  MODULES: . ./compress ./pgremote ./bench ./cmd/pglogwatch
+
+includes:
+  bench:
+    taskfile: ./bench/Taskfile.yml
+    dir: ./bench
+
+tasks:
+  default:
+    desc: Lint, then test every module.
+    cmds:
+      - task: lint
+      - task: test
+
+  test:
+    desc: Run the test suite of every module in the repository.
+    cmds:
+      - for: {var: MODULES}
+        task: module
+        vars: {MODULE: '{{.ITEM}}', CMD: '{{.GO}} test ./...'}
+
+  test-race:
+    desc: Same as test, under the race detector (TST-006).
+    cmds:
+      - for: {var: MODULES}
+        task: module
+        vars: {MODULE: '{{.ITEM}}', CMD: '{{.GO}} test -race ./...'}
+
+  cover:
+    desc: Statement coverage; VAL-006 wants >= 90% root, >= 80% overall.
+    cmds:
+      - '{{.GO}} test -coverprofile=coverage.out ./...'
+      - '{{.GO}} tool cover -func=coverage.out | tail -1'
+    generates:
+      - coverage.out
+
+  fuzz:
+    desc: Short local run of every fuzz target. CI runs these for 30m (TST-007).
+    cmds:
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzParseRecord -fuzztime 30s .'
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzPrefixTemplate -fuzztime 30s .'
+      - '{{.GO}} test -run ''^$'' -fuzz FuzzUnquote -fuzztime 30s .'
+
+  bench:
+    desc: Parser benchmarks with allocation accounting (AC-012).
+    cmds:
+      - '{{.GO}} test -run ''^$'' -bench . -benchmem ./...'
+
+  corpus:
+    desc: Regenerate the versioned benchmark corpus from its seed (TST-003).
+    # The manifest is committed; the payload is not (DAT-001).
+    cmds:
+      - task: bench:corpus
+
+  bench-compare:
+    desc: pglogwatch vs pgbadger vs pgweasel (§6.4, TST-011).
+    # Every performance claim in the README or the release notes must be
+    # reproducible by this target, citing the corpus version and the reference
+    # machine (GUD-006, VAL-004). It runs with whatever is installed and
+    # reports the rest as not measured, so it is useful before the pinned
+    # runner exists.
+    deps: [corpus]
+    cmds:
+      - task: bench:compare
+      - echo
+      - echo "Results written to bench/RESULTS.md."
+      - echo "Any published figure must cite the corpus version and bench/MACHINE.md."
+
+  lint:
+    desc: go vet plus golangci-lint across every module.
+    cmds:
+      - for: {var: MODULES}
+        task: module
+        # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
+        vars: {MODULE: '{{.ITEM}}', CMD: '{{.GO}} vet -stdmethods=false ./...'}
+      - for: {var: MODULES}
+        task: golangci
+        vars: {MODULE: '{{.ITEM}}'}
+
+  tidy:
+    desc: Tidy every module.
+    cmds:
+      - for: {var: MODULES}
+        task: module
+        vars: {MODULE: '{{.ITEM}}', CMD: '{{.GO}} mod tidy'}
+
+  module:
+    internal: true
+    dir: '{{.MODULE}}'
+    cmds:
+      - echo "==> {{.MODULE}}"
+      - '{{.CMD}}'
+
+  golangci:
+    internal: true
+    dir: '{{.MODULE}}'
+    # All five modules share the root .golangci.yml -- golangci-lint walks up
+    # from its working directory to find one -- so the rules are the same
+    # everywhere and there is no per-module config to drift.
+    cmds:
+      - cmd: command -v golangci-lint >/dev/null 2>&1 && golangci-lint run ./... || echo "golangci-lint not installed, skipped {{.MODULE}}"
