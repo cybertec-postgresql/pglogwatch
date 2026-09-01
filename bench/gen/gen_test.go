@@ -48,8 +48,8 @@ func TestManifestMatchesWhatWasWritten(t *testing.T) {
 	require.Len(t, m.Files, 5, "stderr, jsonlog and three csvlog layouts")
 	var total int64
 	for _, f := range m.Files {
-		info, err := os.Stat(filepath.Join(dir, f.Name))
-		require.NoError(t, err, "manifest names %s", f.Name)
+		info, statErr := os.Stat(filepath.Join(dir, f.Name))
+		require.NoError(t, statErr, "manifest names %s", f.Name)
 		assert.Equal(t, info.Size(), f.Bytes,
 			"%s: manifest says %d bytes, file is %d", f.Name, f.Bytes, info.Size())
 		assert.Equal(t, 1000, f.Records)

@@ -77,7 +77,7 @@ func runGrep(o *options) error {
 		if isMatch {
 			marker = "> "
 		}
-		fmt.Fprintf(o.stdout, "%s%s\n", marker, oneLine(recordLine(r)))
+		fmt.Fprintf(o.stdout, "%s%s\n", marker, oneLine(recordLine(r))) //nolint:errcheck // report output
 	}
 	emitOwned := func(r *pglogwatch.OwnedRecord, n int64) {
 		emit(&r.Record, n, false)
@@ -134,7 +134,7 @@ func runGrep(o *options) error {
 		return j.flush()
 	}
 	if matches == 0 {
-		fmt.Fprintln(o.stdout, "(no matching records)")
+		fmt.Fprintln(o.stdout, "(no matching records)") //nolint:errcheck // report output
 	}
 	return nil
 }

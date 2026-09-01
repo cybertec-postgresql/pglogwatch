@@ -154,7 +154,7 @@ func (t *table) add(cells ...string) { t.rows = append(t.rows, cells) }
 
 func (t *table) flush() {
 	if len(t.rows) == 0 {
-		fmt.Fprintln(t.w, "(nothing to report)")
+		fmt.Fprintln(t.w, "(nothing to report)") //nolint:errcheck // report output
 		return
 	}
 	widths := make([]int, len(t.headers))
@@ -196,7 +196,7 @@ func (t *table) line(cells []string, widths []int) {
 			sb.WriteString(strings.Repeat(" ", pad))
 		}
 	}
-	fmt.Fprintln(t.w, sb.String())
+	fmt.Fprintln(t.w, sb.String()) //nolint:errcheck // report output
 }
 
 // writeRecordJSON emits one Record as an NDJSON object.

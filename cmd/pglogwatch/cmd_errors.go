@@ -122,7 +122,10 @@ func errorsJSON(o *options, total int64, bySeverity *[16]int64, byState, byMessa
 // set is a different claim from one drawn from everything.
 func reportDropped(o *options, c *counter) {
 	if c.dropped > 0 {
-		o.stderr.Write([]byte("pglogwatch: " + itoa(c.dropped) +
-			" rare groups were discarded to bound memory; counts of frequent groups are exact\n")) //nolint:errcheck // diagnostic
+		// The //nolint must sit on the line the call starts on rather than
+		// on the last line of the statement, so the message is built first.
+		msg := "pglogwatch: " + itoa(c.dropped) +
+			" rare groups were discarded to bound memory; counts of frequent groups are exact\n"
+		o.stderr.Write([]byte(msg)) //nolint:errcheck // diagnostic
 	}
 }

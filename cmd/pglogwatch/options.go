@@ -141,7 +141,7 @@ func (o *options) eachRecordWithFormat(fn func(*pglogwatch.Record, pglogwatch.Fo
 	if err != nil {
 		return err
 	}
-	defer inputs.Close()
+	defer func() { _ = inputs.Close() }()
 
 	for {
 		rc, name, ok := inputs.Next()
@@ -176,7 +176,7 @@ func (o *options) eachRecordStats(fn func(*pglogwatch.Record), done func(pglogwa
 	if err != nil {
 		return err
 	}
-	defer inputs.Close()
+	defer func() { _ = inputs.Close() }()
 
 	for {
 		rc, name, ok := inputs.Next()
@@ -201,7 +201,6 @@ type inputSet struct {
 	o      *options
 	idx    int
 	usedIn bool
-	open   io.Closer
 }
 
 func (o *options) openInputs() (*inputSet, error) {

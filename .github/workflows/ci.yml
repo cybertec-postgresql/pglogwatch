@@ -14,24 +14,39 @@ env:
 
 jobs:
   vet:
-    name: vet and staticcheck
+    name: vet and staticcheck (${{ matrix.module }})
     runs-on: ubuntu-latest
+    strategy:
+      # Every module is linted even when an earlier one fails. They have
+      # separate dependency graphs, and stopping at the first failure would
+      # hide the others behind it -- which is what the old `for` loop did.
+      fail-fast: false
+      matrix:
+        # Every go.mod in the repository. golangci-lint reads one module at a
+        # time: `./...` does not cross a nested go.mod, so a single run at the
+        # root covers the parser library and silently leaves the CLI, the
+        # compression wrapper, pgremote and the bench harness unlinted.
+        #
+        # All five share the root .golangci.yml -- golangci-lint walks up from
+        # its working directory to find one -- so the rules are the same
+        # everywhere and there is no per-module config to drift.
+        module: [".", "compress", "pgremote", "bench", "cmd/pglogwatch"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
       - name: go vet
-        run: |
-          for m in . ./compress ./pgremote ./bench ./cmd/pglogwatch; do
-            # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
-            (cd "$m" && go vet -stdmethods=false ./...) || exit 1
-          done
+        working-directory: ${{ matrix.module }}
+        # -stdmethods=false: see .golangci.yml for why Parser.Seek is exempt.
+        run: go vet -stdmethods=false ./...
       # v8 is the first action release that runs golangci-lint v2. .golangci.yml
       # is written to the v2 schema (top-level `version`, `formatters`,
       # `linters.settings`), which v1 rejects outright at `config verify`.
       # No `version:` input: the action then installs the latest v2 itself.
       - uses: golangci/golangci-lint-action@v8
+        with:
+          working-directory: ${{ matrix.module }}
 
   test:
     name: test -race

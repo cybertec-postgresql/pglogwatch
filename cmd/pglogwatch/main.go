@@ -48,7 +48,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	cmd, ok := commands[name]
 	if !ok {
-		fmt.Fprintf(stderr, "pglogwatch: unknown command %q\n\n", name)
+		fmt.Fprintf(stderr, "pglogwatch: unknown command %q\n\n", name) //nolint:errcheck // diagnostic
 		usage(stderr)
 		return exitError
 	}
@@ -65,16 +65,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts.paths = fs.Args()
 
 	if err := opts.normalize(); err != nil {
-		fmt.Fprintf(stderr, "pglogwatch: %v\n", err)
+		fmt.Fprintf(stderr, "pglogwatch: %v\n", err) //nolint:errcheck // diagnostic
 		return exitError
 	}
 
 	if err := cmd.run(opts); err != nil {
 		if err == errNoInput {
-			fmt.Fprintln(stderr, "pglogwatch: no input matched")
+			fmt.Fprintln(stderr, "pglogwatch: no input matched") //nolint:errcheck // diagnostic
 			return exitNoInput
 		}
-		fmt.Fprintf(stderr, "pglogwatch: %v\n", err)
+		fmt.Fprintf(stderr, "pglogwatch: %v\n", err) //nolint:errcheck // diagnostic
 		return exitError
 	}
 	return exitOK
@@ -90,6 +90,13 @@ type command struct {
 // noFlags is the flags function for a subcommand that has none of its own.
 func noFlags(*flag.FlagSet, *options) {}
 
+// usage writes the help text.
+//
+// The writes are unchecked. The only response to a failed write of the help
+// text would be to report it, and the writer that would carry that report is
+// the one that just failed.
+//
+//nolint:errcheck // help text; a failed write has nowhere to be reported
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "pglogwatch - read PostgreSQL log files")
 	fmt.Fprintln(w)
