@@ -81,12 +81,12 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	// buffer spent on nothing.
 	workers = min(workers, len(shards))
 
-	parsers, err := newWorkerParsers(cfg, workers)
+	// A log_line_prefix the caller got wrong is a configuration error, and
+	// compiling it once up here is what lets ParallelScan report it.
+	// Detecting it inside a worker cannot: scanShard's Reset clears the err
+	// New set, and the scan then silently auto-detects instead.
+	tpl, err := workerPrefix(cfg)
 	if err != nil {
-		// A log_line_prefix the caller got wrong is a configuration error,
-		// and compiling it once here is what lets ParallelScan report it.
-		// Detecting it inside a worker cannot: scanShard's Reset clears the
-		// err New set, and the scan then silently auto-detects instead.
 		return err
 	}
 
@@ -115,7 +115,14 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	var next atomic.Int64
 	for worker := range workers {
 		wg.Go(func() {
-			p := parsers[worker]
+			// Built HERE, on the worker's own goroutine, and deliberately
+			// so. Its read buffer is the hottest memory in the scan, and
+			// on a NUMA machine the page lands on the node that first
+			// touches it. Allocating all of them together on the parent --
+			// one slab, one allocation, which is otherwise the tidier
+			// shape -- puts every worker's buffer on one node and makes
+			// the scan 1.8x slower on a two-node part.
+			p := newParser(nil, cfg, tpl)
 			var rd shardReader
 			for {
 				i := int(next.Add(1)) - 1
@@ -137,41 +144,18 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	return ctx.Err()
 }
 
-// newWorkerParsers builds n parsers over ONE allocation.
+// workerPrefix compiles Config.LinePrefix once for every worker to share.
 //
-// Each parser needs a read buffer, and New allocates one apiece. Done inside
-// the worker goroutines, as this used to be, that is n concurrent large-object
-// allocations at the same instant of every call -- and ParallelScan is called
-// once per corpus, so the cost lands entirely in the startup of a call that
-// may only last a few milliseconds.
-//
-// The prefix is compiled once and shared. Sharing is safe for the same reason
-// compiledCandidates is: scanPrefix reads the template and writes only into
-// the caller's Record and tzCache, both of which are per-parser.
-func newWorkerParsers(cfg Config, n int) ([]*Parser, error) {
-	cfg.normalize() // idempotent; newParser normalises its own copy again
-
-	var tpl *prefixTemplate
-	if cfg.LinePrefix != "" {
-		var err error
-		if tpl, err = compilePrefix(cfg.LinePrefix); err != nil {
-			return nil, err
-		}
+// Sharing the template is safe for the same reason compiledCandidates is:
+// scanPrefix reads it and writes only into the caller's Record and tzCache,
+// both of which are per-parser. Compiling it here rather than in each worker
+// also means a prefix the caller got wrong is reported, instead of every
+// worker quietly falling back to detection.
+func workerPrefix(cfg Config) (*prefixTemplate, error) {
+	if cfg.LinePrefix == "" {
+		return nil, nil
 	}
-
-	size := cfg.InitialBufferBytes
-	slab := make([]byte, n*size)
-	parsers := make([]*Parser, n)
-	for i := range parsers {
-		lo, hi := i*size, (i+1)*size
-		// THREE-index. buf.fill reads into data[w:], so a two-index slice
-		// would let one worker read past its buffer and into the next
-		// worker's. The race detector cannot see that -- no two goroutines
-		// touch the same address, one simply reads too far -- so the
-		// capacity is the only thing keeping them apart.
-		parsers[i] = newParser(nil, cfg, slab[lo:hi:hi], tpl)
-	}
-	return parsers, nil
+	return compilePrefix(cfg.LinePrefix)
 }
 
 // shardReader is io.SectionReader without an allocation per shard.

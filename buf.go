@@ -52,21 +52,9 @@ type buf struct {
 }
 
 func newBuf(src io.Reader, cfg *Config, stats *Stats) *buf {
-	return newBufStorage(src, cfg, stats, nil)
-}
-
-// newBufStorage is newBuf over a caller-supplied buffer.
-//
-// storage must be exactly InitialBufferBytes long AND have that capacity:
-// fill reads into data[w:], so storage carved out of a larger slab without a
-// three-index slice would read straight into whatever follows it.
-func newBufStorage(src io.Reader, cfg *Config, stats *Stats, storage []byte) *buf {
-	if storage == nil {
-		storage = make([]byte, cfg.InitialBufferBytes)
-	}
 	return &buf{
 		src:     src,
-		data:    storage,
+		data:    make([]byte, cfg.InitialBufferBytes),
 		max:     cfg.MaxRecordBytes,
 		initial: cfg.InitialBufferBytes,
 		stats:   stats,

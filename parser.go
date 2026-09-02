@@ -80,23 +80,22 @@ type Parser struct {
 // the log destination from the first non-empty line. New does no I/O: the
 // first read happens on the first call to [Parser.Next], so a Parser over a
 // slow or empty source costs nothing until it is used.
-func New(r io.Reader, cfg Config) *Parser { return newParser(r, cfg, nil, nil) }
+func New(r io.Reader, cfg Config) *Parser { return newParser(r, cfg, nil) }
 
-// newParser is New over optionally pre-supplied resources.
+// newParser is New with Config.LinePrefix already compiled.
 //
-// storage, when not nil, is the parser's read buffer instead of one it
-// allocates; it must have cap == len. tpl, when not nil, is an already
-// compiled Config.LinePrefix. Both exist for ParallelScan, which builds
-// several parsers at once and would otherwise pay one large-object allocation
-// and one prefix compilation per worker per call.
-func newParser(r io.Reader, cfg Config, storage []byte, tpl *prefixTemplate) *Parser {
+// It exists for ParallelScan, whose workers all share one template rather than
+// each compiling the same prefix -- and, more importantly, so that a prefix
+// that does not compile is reported once by ParallelScan instead of being
+// swallowed by every worker's Reset.
+func newParser(r io.Reader, cfg Config, tpl *prefixTemplate) *Parser {
 	cfg.normalize()
 	p := &Parser{
 		cfg:    cfg,
 		format: cfg.Format,
 		sev:    newSeverityResolver(cfg.MessagesLang),
 	}
-	p.buf = newBufStorage(r, &p.cfg, &p.stats, storage)
+	p.buf = newBuf(r, &p.cfg, &p.stats)
 	if tpl != nil {
 		p.prefix = tpl
 		p.detectedPrefix = tpl.String()

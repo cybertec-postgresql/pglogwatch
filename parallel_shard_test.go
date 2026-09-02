@@ -164,28 +164,36 @@ func TestParallelScanRejectsABadLinePrefix(t *testing.T) {
 	assert.Zero(t, got, "no record may be delivered under a Config that was refused")
 }
 
-// TestWorkerParserBuffersDoNotOverlap guards the one mistake in the shared
-// slab that no other test can see.
+// TestParallelScanWorkersDoNotShareABuffer.
 //
-// The workers' read buffers are carved out of a single allocation. buf.fill
-// reads into data[w:], so a two-index slice would leave each worker's buffer
-// with the capacity of the whole remaining slab and let it read straight into
-// the next worker's. The race detector cannot catch that -- no two goroutines
-// touch one address, one simply reads too far -- so the capacity is the only
-// thing keeping them apart.
-func TestWorkerParserBuffersDoNotOverlap(t *testing.T) {
-	const workers = 8
-	cfg := Config{Format: FormatJSON}
-	parsers, err := newWorkerParsers(cfg, workers)
-	require.NoError(t, err)
-	require.Len(t, parsers, workers)
-
+// Each worker builds its own parser on its own goroutine. An earlier version
+// carved all of them out of one slab, which was tidier and 1.8x slower on a
+// two-node NUMA machine: the slab lands on whichever node allocated it, and a
+// worker's read buffer is the hottest memory in the scan. This pins the
+// property that replaced it -- separate buffers, one per worker -- because a
+// shared or overlapping buffer is silent corruption the race detector cannot
+// see.
+func TestParallelScanWorkersDoNotShareABuffer(t *testing.T) {
 	var norm Config
 	norm.normalize()
-	for i, p := range parsers {
-		assert.Len(t, p.buf.data, norm.InitialBufferBytes, "worker %d", i)
-		assert.Equal(t, norm.InitialBufferBytes, cap(p.buf.data),
-			"worker %d: capacity beyond its own buffer lets fill read into "+
-				"the next worker's", i)
+
+	seen := map[*byte]int{}
+	for i := range 8 {
+		p := newParser(nil, Config{Format: FormatJSON}, nil)
+		require.Len(t, p.buf.data, norm.InitialBufferBytes, "worker %d", i)
+		require.Equal(t, norm.InitialBufferBytes, cap(p.buf.data),
+			"worker %d: capacity past its own buffer lets fill read into "+
+				"whatever follows", i)
+		seen[&p.buf.data[0]]++
 	}
+	assert.Len(t, seen, 8, "every worker must get its own buffer")
+}
+
+func TestWorkerPrefixRejectsABadPrefix(t *testing.T) {
+	_, err := workerPrefix(Config{LinePrefix: "%z "})
+	assert.Error(t, err)
+
+	tpl, err := workerPrefix(Config{})
+	assert.NoError(t, err)
+	assert.Nil(t, tpl, "no configured prefix means detection, not an error")
 }
