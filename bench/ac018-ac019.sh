@@ -95,7 +95,7 @@ run_ac019() {
 	# which misses AC-019 still goes on to measure AC-018. Running one
 	# verification is not a reason to skip the other, and the summary at
 	# the end carries the exit status.
-	if PGLOGWATCH_BENCH_MACHINE=1 \
+	if PGLOGWATCH_BENCH=1 \
 		PGLOGWATCH_BENCH_MACHINE_NAME="$(hostname)" \
 		go test -run TestParallelScanScales -v -timeout 30m . 2>&1 | tail -20; then
 		printf '\nAC-019: MET\n'

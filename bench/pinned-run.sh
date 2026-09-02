@@ -79,7 +79,7 @@ GOMAXPROCS=8 "$BIN" -test.run '^$' \
 
 echo
 echo "== 2. TestParallelScanScales (the measurement of record)"
-PGLOGWATCH_BENCH_MACHINE=1 GOMAXPROCS=8 \
+PGLOGWATCH_BENCH=1 GOMAXPROCS=8 \
 	"$BIN" -test.run TestParallelScanScales -test.v -test.timeout 30m 2>&1 | tail -20
 
 # The trap restores from here, whatever happened above.

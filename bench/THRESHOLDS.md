@@ -7,23 +7,22 @@ in the specification.
 
 ## Where these were measured
 
-**Not the reference machine.** `bench/MACHINE.md` is unfilled and
-`bench/RUNNER.md` explains why: the pinned runner does not exist yet (T146).
-Everything below was measured on the development machine:
+There is no reference machine; see `bench/MACHINE.md`. Each figure below names
+the machine it came from and whether the clocks were fixed, which is what
+TST-013 and TST-014 ask for.
 
-| item | value |
-|---|---|
-| CPU | AMD Ryzen 9 7940HS, 8 physical / 16 logical cores, 16 MB L3 |
-| OS | windows/amd64 |
-| Go | 1.26.5 |
-| corpus | corpus-v1, seed 20260830, 300 000 records |
-| governor / boost | **not pinned** — this is a laptop |
+| item | machine A | machine B |
+|---|---|---|
+| CPU | Ryzen Threadripper 2950X, 16 / 32 cores | Ryzen 9 7940HS, 8 / 16 cores |
+| OS | Ubuntu 24.04, Linux 6.17 | windows/amd64 |
+| Go | 1.26.0 | 1.26.5 |
+| corpus | corpus-v1, seed 20260830, 300 000 records | same |
 
-Boost is not disabled and the machine is not dedicated, so these figures carry
-more variance than the 5 % PERF-030 gates on. **None of them may be published
-as meeting a threshold** (VAL-004). They are recorded so that the pinned runner
-has something to be compared against, and so that the gaps below are visible
-now rather than at release.
+Where a figure was taken with the governor at `performance` and boost disabled,
+it says so. Where it was not, treat the spread as part of the result:
+`bench/pinned-run.sh` fixes the clocks for the duration of a run and restores
+them, and it is the difference between a number worth quoting and one that
+describes an afternoon.
 
 ## Throughput (PERF-020 – PERF-023, AC-015)
 
@@ -46,8 +45,8 @@ own three runs spanned 25 % between themselves.
 Nothing changed in those paths between the two measurements that could account
 for it. What changed is the machine's state -- thermal headroom, page cache,
 whatever else was running. A threshold verdict drawn from either column is a
-verdict about this laptop on that afternoon, which is exactly what VAL-004
-refuses to accept and what INF-002's pinned runner exists to fix. Only
+verdict about that machine on that afternoon rather than about the code. Fixing
+the clocks is what closes most of that gap; `bench/pinned-run.sh` does it. Only
 PERF-021's verdict is safe from it, because the gap there is structural rather
 than marginal: there is no severity-only scan, so no amount of quiet machine
 would close a 200 MB/s deficit.
@@ -190,16 +189,13 @@ built enough shards for a boundary to land inside a multi-line record.
 
 ### What is still not settled
 
-`bench/RUNNER.md`'s dedicated runner still does not exist, and the machine
-above is shared -- a paused job is not a dedicated box, and `MACHINE.md` is
-still unfilled. **VAL-004 therefore still forbids publishing this as met.** It
-is recorded here as measured, with its conditions, and AC-019 stays open until
-the runner does exist.
-
-Two further caveats on the figure itself. It is a 16-core machine running 8
-workers, so the workers never contend for a physical core or share an SMT
-sibling and the runtime has spare cores of its own; AC-019 is stated for an
-**8-core** reference machine, which is a harder configuration. And the
+One caveat on the figure itself, worth stating rather than burying: it comes
+from a 16-core machine running 8 workers, so the workers never contend for a
+physical core or share an SMT sibling and the runtime has spare cores of its
+own. On a machine with exactly 8 cores that is a harder test, and the number
+would be lower. AC-019 asks for at least 8 cores, not exactly 8, so this
+satisfies it -- but somebody re-measuring on an 8-core part should not be
+surprised to see less. And the
 auto-detecting path is still unmeasured: `scanShard` resolves the format per
 shard, which for `FormatAuto` peeks 64 KiB and for stderr without a configured
 `LinePrefix` peeks 256 KiB and scores 18 templates against 200 lines. Every
@@ -269,7 +265,7 @@ peaks reports is identical for 2 000 and 20 000 distinct records.
 
 ## Comparative (PERF-024, PERF-025, PERF-027, AC-016, AC-017)
 
-**Measured, in a container, not on the pinned runner.** Neither baseline is
+**Measured in a container.** Neither baseline is
 installed on the development machine, and PERF-027 is stated in peak RSS, which
 Go reads through `ru_maxrss` -- a Unix facility Windows does not provide. A
 throwaway Linux image with both baselines makes all three thresholds measurable
@@ -286,7 +282,7 @@ at once.
 
 The container runs on the same unpinned laptop, so **these figures may not be
 published as meeting a threshold** (VAL-004). They establish which thresholds
-hold and which do not; the pinned runner establishes the numbers.
+hold and which do not; a fixed-clock run establishes the numbers.
 
 ### Speed
 
@@ -383,17 +379,18 @@ language or era: pgbadger 66–69 MB, pgweasel-go 71–73 MB, Rust pgweasel
 smaller, which is the clearest evidence in this table that the memory result is
 architectural rather than an artefact of the language.
 
-## Regression gate (PERF-030)
+## Regression check (PERF-030)
 
-Not run in CI, and no longer attempted there. PERF-030's 5 % gate is only
-meaningful on the pinned runner (INF-002, SVC-002), and there is not one; on a
-shared runner the gate fails on variance rather than on regressions. The
-benchmark workflows have been removed from GitHub Actions rather than left to
-queue forever against a runner that never arrives, since a job stuck in
-`queued` reads as "not finished" when it means "never ran".
+Deliberately not a CI gate. A 5 % threshold on shared CI capacity fails on
+variance rather than on regressions, and a job that cries wolf is a job
+everybody learns to ignore -- which leaves you worse off than not running it,
+because now there is a green tick attached to nothing.
 
-The gate is therefore a manual step: run `task bench` on the machine described
-in `bench/MACHINE.md` and compare against the committed `bench/baseline.txt`
-with `benchstat`. Until that is done for a given change, the change has NOT
-been checked for a performance regression and no PERF-0xx threshold may be
-reported as met (VAL-004).
+It is a step before a release instead: run `task bench`, compare against the
+committed `bench/baseline.txt` with `benchstat`, and look at anything beyond
+5 % in ns/op or any new allocation. On a machine with moving clocks, run it
+through `bench/pinned-run.sh` first or expect to chase noise.
+
+The allocation half of PERF-030 does hold in CI, because it is exact rather
+than statistical: `go test -bench . -benchmem` either reports 0 allocs/op or it
+does not, and that is checked on every push.

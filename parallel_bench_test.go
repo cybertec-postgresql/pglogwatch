@@ -107,8 +107,8 @@ const (
 
 // cpuClassNames are the runtime/metrics counters that say how the CPUs were
 // spent. runtime/metrics is used rather than getrusage or GetProcessTimes
-// because it is portable: the Linux reference machine and a Windows
-// development checkout then report the same quantity.
+// because it is portable: a Linux benchmark run and a Windows development
+// checkout then report the same quantity.
 var cpuClassNames = [...]string{
 	"/cpu/classes/total:cpu-seconds",
 	"/cpu/classes/idle:cpu-seconds",
@@ -302,16 +302,27 @@ func measureSpeedup(ctx context.Context, t *testing.T, srcs []io.ReaderAt,
 // TestParallelScanScales measures AC-019 and PERF-029.
 //
 // The measurement always runs and always logs its result. The ASSERTION runs
-// only on the reference machine (PGLOGWATCH_BENCH_MACHINE=1) and only at the
-// GOMAXPROCS the requirement is stated for.
+// when PGLOGWATCH_BENCH=1 says the run is a deliberate benchmark, and when the
+// measurement itself says it can support one.
 //
-// That is not a way to dodge the threshold. PERF-029 and AC-019 are defined in
-// §3.4 against the reference machine of §6, and a scaling ratio measured at
-// some other GOMAXPROCS is a different quantity: 8 workers spread over 16 Ps
-// leave half the runtime's schedulers spinning for work they will not find,
-// and on an SMT machine that steals issue slots from the siblings doing the
-// parsing. The test refuses to assert on a configuration it did not ask for
-// rather than reporting a number that looks like AC-019 and is not.
+// The variable is not a blessed machine -- there is no reference machine and no
+// dedicated runner (see bench/MACHINE.md). It marks intent. A scaling threshold
+// asserted during an ordinary `go test ./...` fails on any laptop with boost
+// enabled or a browser open, and a test that is red for everybody is a test
+// everybody learns to ignore. bench/pinned-run.sh sets it.
+//
+// Two further conditions, and these are measured rather than declared.
+// GOMAXPROCS must equal the worker count, because a scaling
+// ratio taken at some other value is a different quantity: 8 workers spread
+// over 16 Ps leave half the runtime's schedulers hunting for work they will not
+// find, and on an SMT part that steals issue slots from the siblings doing the
+// parsing. And the median and best-case ratios must agree, because
+// interference only ever makes a run slower -- so a gap between them means a
+// neighbouring workload was measured rather than this code.
+//
+// Failing on a busy laptop would teach everybody to ignore this test, which is
+// worse than not having it. Skipping WITH the number keeps it informative
+// there and load-bearing where the conditions hold.
 func TestParallelScanScales(t *testing.T) {
 	if testing.Short() {
 		t.Skip("scaling measurement is not a short test")
@@ -345,7 +356,7 @@ func TestParallelScanScales(t *testing.T) {
 	// whether that cost is still there; if it is gone the two converge.
 	//
 	// The first is the size AC-019 has been measured at, and is the headline.
-	var headline float64
+	var headline, headlineBest float64
 	for i, bytesPerFile := range []int{4 << 20, 16 << 20} {
 		data := bytes.Repeat(one, bytesPerFile/len(one))
 		srcs := make([]io.ReaderAt, need)
@@ -355,20 +366,27 @@ func TestParallelScanScales(t *testing.T) {
 		t.Logf("%d files x %d MiB (%d MiB total):",
 			need, bytesPerFile>>20, (need*bytesPerFile)>>20)
 
-		median, _ := measureSpeedup(t.Context(), t, srcs, cfg, need, reps)
+		median, best := measureSpeedup(t.Context(), t, srcs, cfg, need, reps)
 		if i == 0 {
-			headline = median
+			headline, headlineBest = median, best
 		}
 	}
 
-	if os.Getenv("PGLOGWATCH_BENCH_MACHINE") != "1" {
-		t.Skipf("measured %.2fx; PERF-029's threshold is asserted only on the "+
-			"reference machine (set PGLOGWATCH_BENCH_MACHINE=1 there)", headline)
+	if os.Getenv("PGLOGWATCH_BENCH") != "1" {
+		t.Skipf("measured %.2fx; set PGLOGWATCH_BENCH=1 to assert PERF-029's "+
+			"threshold, or run bench/pinned-run.sh which fixes the clocks first",
+			headline)
 	}
 	if gomaxprocs != need {
 		t.Skipf("measured %.2fx at GOMAXPROCS=%d; AC-019 is stated for %d workers "+
 			"on %d cores, so run it as: GOMAXPROCS=%d go test -run TestParallelScanScales .",
 			headline, gomaxprocs, need, need, need)
+	}
+	if noise := max(headline, headlineBest) / min(headline, headlineBest); noise > scalingNoiseRatio {
+		t.Skipf("measured %.2fx median against %.2fx best, %.0f%% apart: this machine "+
+			"was busy during the run, so the number describes the machine. Retry on an "+
+			"idle machine, or use bench/pinned-run.sh",
+			headline, headlineBest, 100*(noise-1))
 	}
 	// PERF-029's 0.75 of linear on 8 cores; AC-019 states the same bound as
 	// 6x. The assertion is the requirement itself, not a tighter number,

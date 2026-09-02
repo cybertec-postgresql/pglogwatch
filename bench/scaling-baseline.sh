@@ -110,7 +110,7 @@ echo "profiles in $OUT (go tool pprof -top $BIN $OUT/cpu8.prof)"
 # What bench/ac018-ac019.sh actually asserts today, plus the GOMAXPROCS the
 # requirement is stated at. Expect it to log a speedup and then skip or fail.
 hr "5. TestParallelScanScales (the current AC-019 assertion)"
-PGLOGWATCH_BENCH_MACHINE=1 GOMAXPROCS=8 \
+PGLOGWATCH_BENCH=1 GOMAXPROCS=8 \
   "$BIN" -test.run TestParallelScanScales -test.v -test.timeout 30m 2>&1 | tail -20
 
 # --------------------------------------------------- 6. stderr auto-detect

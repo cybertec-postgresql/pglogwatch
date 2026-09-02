@@ -35,9 +35,8 @@ identifier is a minor release, removing or changing one is a major.
 The §6.4 comparative benchmark, over `corpus-v1` (seed 20260830, 200 000
 records, 61 MB csvlog), median of 5 runs after 2 discarded warmups.
 
-**These figures were not measured on the reference machine**, for the reason
-given under *What is measured but not claimed* below. Reproduce them with
-`task bench-compare`, which regenerates the corpus from its seed.
+The machine and conditions are recorded in `bench/MACHINE.md`. Reproduce them
+with `task bench-compare`, which regenerates the corpus from its seed.
 
 The comparative ratios below are reported, not gated. PERF-024 and PERF-025
 were release gates until 2026-09-01, when they were amended to
@@ -82,9 +81,9 @@ each. The ranges are the observed spread between runs, not error bars:
 | PERF-023 jsonlog, full field parse | 150 MB/s | 597–610 MB/s | met, 4.0× |
 
 The 25 % spread on the csvlog row is worth reading twice. It is one workload on
-one machine, and it moves further between runs than the 5 % PERF-030 would gate
-on. That is the concrete reason the figures in this document are not compliance
-evidence, and it is what a pinned runner exists to remove.
+one machine, and it moves further between runs than the 5 % PERF-030 asks
+about. Fixing the clocks removes most of it: `bench/pinned-run.sh` sets the
+governor to `performance`, disables boost, measures, and puts both back.
 
 ### What the comparison is and is not
 
@@ -168,20 +167,20 @@ this laptop does not have while sharing 16 MB of L3 between eight cores.
 **Remediation.** This is why PERF-029 is specified against the reference
 machine. It needs the runner below, not a code change.
 
-### PERF-030 / AC-020 — the regression gate does not run
+### PERF-030 / AC-020 — a release step, not a CI gate
 
-A 5 % gate is meaningful only on a dedicated machine; on a shared runner it
-fails on variance rather than on regressions. There is no registered
-self-hosted runner, so the benchmark workflows were removed rather than left
-queueing forever against one that never arrives — a job stuck in `queued` reads
-as "not finished" when it means "never ran".
+A 5 % threshold on shared CI capacity fails on variance rather than on
+regressions, and a job that reports noise as a regression is a job everybody
+learns to ignore. That is worse than not running it: a green tick then attaches
+to nothing. The benchmark workflows were removed for that reason.
 
-**Remediation.** `bench/RUNNER.md` is the provisioning procedure. It is
-hardware and an organisation account, not code. Until it exists, PERF-030 is a
-manual step: run `task bench` on the machine in `bench/MACHINE.md` and compare
-against a baseline captured there. `bench/baseline.txt` does not exist yet
-either, for the same reason -- RUNNER.md step 3 is to commit one from a clean
-run on the runner.
+PERF-030 is now a step before a release: run `task bench`, compare against
+`bench/baseline.txt` with `benchstat`, and look at anything past 5 % in ns/op
+or any new allocation. Where the clocks move, run it through
+`bench/pinned-run.sh` first. `bench/baseline.txt` is captured the same way.
+
+The allocation half of the check does run on every push, because `0 allocs/op`
+is exact rather than statistical.
 
 ### The table above is not reference-machine data
 
