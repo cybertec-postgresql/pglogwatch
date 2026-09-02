@@ -99,6 +99,8 @@ such. Option 1 is the recommendation.
 
 ## Parallel scaling (PERF-029, AC-019)
 
+Tracked as [issue #3](https://github.com/cybertec-postgresql/pglogwatch/issues/3).
+
 **NOT MET, and the cause is in this code rather than in the machine.** An
 earlier revision of this file blamed memory bandwidth on a laptop. Three
 machines say otherwise.

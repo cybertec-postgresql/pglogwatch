@@ -135,7 +135,8 @@ The cause is a fixed per-call cost in `ParallelScan` that does not
 parallelise, plus `planShards` clamping shards per source to the
 worker count, so a 1-worker run and an 8-worker run divide the same input into
 8 and 64 shards respectively and do not do equal work. `bench/THRESHOLDS.md`
-has the measurements and a two-step remediation.
+has the measurements and a two-step remediation; the work is tracked as
+[issue #3](https://github.com/cybertec-postgresql/pglogwatch/issues/3).
 
 **AC-020, PERF-029, PERF-030 — the regression gate.** A 5 % gate is meaningful
 only on a dedicated machine. There is no registered self-hosted runner, so the
