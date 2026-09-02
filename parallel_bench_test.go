@@ -324,6 +324,17 @@ func TestParallelScanScales(t *testing.T) {
 	reps := scalingReps(t)
 	gomaxprocs := runtime.GOMAXPROCS(0)
 	t.Logf("NumCPU=%d GOMAXPROCS=%d reps=%d", runtime.NumCPU(), gomaxprocs, reps)
+	if runtime.NumCPU() > gomaxprocs {
+		// The scheduler is free to move the worker threads around every
+		// CPU, and on a multi-die part that means across dies: a thread
+		// that migrates arrives with none of its cache. Serial-side
+		// spreads of better than two to one come from this, and they are
+		// wide enough to swamp the effect being measured.
+		t.Logf("  hint: %d CPUs but GOMAXPROCS=%d, so threads may migrate across "+
+			"cores or dies between samples. Pin them for a tighter spread: "+
+			"taskset -c <one logical CPU per physical core> go test ...",
+			runtime.NumCPU(), gomaxprocs)
+	}
 
 	one := fixture(t, "json/basic.json")
 	cfg := Config{Format: FormatJSON}

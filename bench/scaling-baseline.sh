@@ -7,7 +7,7 @@
 #
 # It answers one question that TestParallelScanScales deliberately does not:
 # how much of the ~4x at 8 workers is the code, and how much is GC, GOMAXPROCS
-# and run order? On the development laptop those three alone moved the same
+# and run order? On the development machine those three alone moved the same
 # binary between 3.27x and 5.72x, which is why no single-sample ratio may be
 # published (VAL-004).
 #
@@ -64,8 +64,8 @@ hr "1. ladder, one process, count=6, -benchmem"
 "$BIN" -test.run '^$' -test.bench "$BENCH" -test.benchtime=2s -test.count=6 -test.benchmem
 
 # --------------------------------------------------- 2. confounder matrix
-# Same binary, same benchmark, four environments. On the dev laptop these
-# four spanned 3.27x to 5.72x. If they span anything like that here, the
+# Same binary, same benchmark, four environments. On the development machine
+# these spanned 3.27x to 5.72x. If they span anything like that here, the
 # "~4x is a property of the code" conclusion does not hold yet.
 hr "2. confounder matrix (1 vs 8 workers)"
 for gogc in 100 off; do
