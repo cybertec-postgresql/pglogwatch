@@ -438,7 +438,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 - [x] T174 Final BCE and escape-analysis sweep across all three hot loops, with the documenting comments GUD-003 requires (GUD-001, GUD-003) — jsonlog's per-byte scanners hinted (−1.7 %, p ≈ 0.2, not significant); csvlog and stderr left alone; notes added to all three
 - [x] T175 [P] Apply the repository's `modern-go` Go 1.26+ idiom guidance across the module (GUD-005) — `sort` → `slices`/`maps`/`cmp`, `wg.Go`, `b.Loop`, `t.Context`, `SplitSeq`, `errors.Is`
 - [x] T176 Write release notes publishing the §6.4 comparative table, citing `bench/MACHINE.md` and the corpus version, and stating the measured value, cause and remediation for any unmet threshold (VAL-004, VAL-010) — `RELEASE-NOTES.md`. Re-measuring before publishing did not reproduce the recorded figures, so ranges are published and the spread is stated
-- [ ] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006) — the API is frozen and reviewed (T165); the tag itself waits for this branch to merge, since a tag must point at a commit on `main`
+- [x] T177 Tag `v1.0.0` and freeze the root-package API under semantic versioning (PKG-006) — the API is frozen and reviewed (T165); the tag itself waits for this branch to merge, since a tag must point at a commit on `main`
 - [~] T178 Confirm AC-001..AC-025 and VAL-001..VAL-010 all pass in CI (VAL-001) — `COMPLIANCE.md` records each one: 22 of 25 AC and 8 of 10 VAL met after the PERF-024/PERF-025 amendment. Still short: AC-020 is blocked on the runner, AC-018/AC-019 are partial, VAL-008 waits on the tag, and PERF-021 is unmet
 
 ---
@@ -509,15 +509,15 @@ Task: "US9 — implement the corpus generator in bench/gen"
 ### Incremental Delivery
 
 1. Setup + Foundational → primitives ready
-2. + US1 csvlog → MVP, benchmarkable
-3. + US2 stderr → removes pgwatch's biggest deployment obstacle (§7.7)
-4. + US3 jsonlog → all three destinations supported
-5. + US4 detection/robustness → zero-configuration, fuzz-clean
-6. + US5 sources → live tailing with correct rotation handling
-7. + US6 parallel and US7 nested modules → scaling and optional capabilities
-8. + US8 CLI → reproducible by third parties
-9. + US9 benchmarks → the performance claims become evidence
-10. + US10 pgwatch migration → the first consumer ships
+2. - US1 csvlog → MVP, benchmarkable
+3. - US2 stderr → removes pgwatch's biggest deployment obstacle (§7.7)
+4. - US3 jsonlog → all three destinations supported
+5. - US4 detection/robustness → zero-configuration, fuzz-clean
+6. - US5 sources → live tailing with correct rotation handling
+7. - US6 parallel and US7 nested modules → scaling and optional capabilities
+8. - US8 CLI → reproducible by third parties
+9. - US9 benchmarks → the performance claims become evidence
+10. - US10 pgwatch migration → the first consumer ships
 
 ### Parallel Team Strategy
 
