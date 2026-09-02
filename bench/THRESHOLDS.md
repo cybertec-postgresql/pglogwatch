@@ -101,84 +101,109 @@ such. Option 1 is the recommendation.
 
 Tracked as [issue #3](https://github.com/cybertec-postgresql/pglogwatch/issues/3).
 
-**NOT MET, and the cause is in this code rather than in the machine.** An
-earlier revision of this file blamed memory bandwidth on a laptop. Three
-machines say otherwise.
+**MET when measured properly. The shortfall recorded here was the measurement,
+not the code.**
 
-| where | physical / logical cores | speedup at 8 workers |
-|---|---:|---:|
-| development laptop (Ryzen 9 7940HS) | 8 / 16 | 4.07–4.33× |
-| server (Ryzen 7 5700G) | 8 / 16 | 3.69× |
-| server (Threadripper 2950X) | **16 / 32** | **3.99×** |
+| corpus | 1 worker | 8 workers | speedup | CPUs busy |
+|---|---:|---:|---:|---:|
+| 8 x 4 MiB (32 MB) | 111.7 ms | 16.35 ms | **6.83x** median, 6.82x best of 30 | 7.91 of 8 |
+| 8 x 16 MiB (128 MB) | 451.5 ms | 65.32 ms | **6.91x** median, 6.88x best of 30 | 7.95 of 8 |
 
-The last row is the decisive one. It runs eight workers on a machine with
-eight further cores left idle, so no worker contends with another for a
-physical core or shares an SMT sibling — and it lands in the same band as the
-two machines that have exactly eight. Doubling the hardware available to the
-same eight workers changed nothing. That is what "the ceiling is in the code"
-means, measured rather than inferred.
+Threadripper 2950X, 16 cores, `GOMAXPROCS=8`, `performance` governor, boost
+disabled, no other workload. Median and best agree to 0.15 %, and each side
+spreads about 2 %.
 
-An earlier reading of the middle row called that machine 16-core and treated
-its 3.69× as the surprising result. It has 8 physical cores and 16 threads,
-the same parallel width as the laptop, so it was never the wider machine it
-looked like. The Threadripper is.
+### What the earlier 4x was
 
-A second experiment agrees: holding everything else constant and growing the
-working set makes scaling **better**, which is the opposite of what a
-bandwidth ceiling produces.
+Three things, none of them `ParallelScan`.
 
-| total working set | speedup at 8 workers |
-|---|---:|
-| 1.6 MB | 2.85× |
-| 6.4 MB | 3.91× |
-| 32 MB | 3.94× |
-| 128 MB | 4.30× |
+**A single sample per side.** `TestParallelScanScales` took one
+`testing.Benchmark` measurement of each side, in sequence, and divided them. On
+the machines used, the same binary and the same benchmark produced anywhere
+between 3.27x and 5.72x depending only on `GOGC`, `GOMAXPROCS` and whether the
+two sides ran in one process or two.
 
-That curve is the signature of a fixed per-call cost that does not
-parallelise: small workloads are dominated by it, large ones amortise it, and
-none of them reaches linear.
+**Boost clocks.** `MACHINE.md` already says a parser benchmark is the shape
+boost flatters. It flatters the 1-worker side specifically: one active core
+boosts, eight do not, so the baseline is measured fast and the parallel run
+slow. That deflates the ratio in a way indistinguishable from poor scaling.
 
-### The benchmark also compares unequal work
+**A neighbouring workload.** The machine ran a periodic heavy job. Interference
+only ever makes a run slower, so it widened the spread without moving the
+floor: the 8-worker figure swung between 4.06 ms and 7.41 ms in one session
+while the 4-worker samples, which happened to fall in a quiet window, held to
+0.8 %.
 
-`planShards` clamps the number of parts per source to the worker count:
+Pinning the clocks and pausing the job took the same code from 3.82x to 6.83x.
+Measured under those conditions, `main` at the time the issue was filed scores
+**6.38x** and the branch that closes the issue scores **6.35x** -- the same
+number. **The threshold was already met and had never been measured.**
 
-```go
-parts := int(size / minShardBytes)
-parts = min(max(parts, 1), workers)
-```
+The two hypotheses this file previously recorded are both wrong and are
+withdrawn. It is not memory bandwidth: growing the working set makes scaling
+better, not worse. Nor is it a fixed per-call cost in the code: a CPU profile
+at 8 workers puts 91.5 % of samples in `Parser.Next`, with no GC, lock,
+allocator or scheduler frame above 2 %, and `gctrace` shows the collector
+taking about 2.5 % of wall against a flat 4 MB heap goal.
 
-So over the same eight 4 MiB inputs, a **1-worker run gets 8 shards and an
-8-worker run gets 64**. The parallel side pays eight times the per-shard setup
--- a `Parser.Reset`, a seek, and a resync to the next record boundary -- and
-the ratio between them is not a pure measure of parallelism. Holding the shard
-count equal (sources small enough that `parts` is always 1) moves the figure
-from 4.32× to 4.75× on the laptop: worth about 10 %, and still short of
-PERF-029's 6×.
+### What changed anyway
 
-Measured with the shard count held equal, the efficiency curve is:
+Worth about 2 % of throughput and nothing on the ratio, but kept:
 
-| workers | speedup | efficiency |
-|---:|---:|---:|
-| 2 | 1.94× | 0.97 |
-| 4 | 3.14× | 0.79 |
-| 8 | 4.75× | 0.59 |
+- `planShards` no longer clamps parts per source to the worker count. It made
+  the shape of the work depend on `--jobs`: eight 4 MiB files became 8 shards
+  at `--jobs 1` and 64 at `--jobs 8`, so the two sides of the ratio did
+  different amounts of per-shard work. `main`'s 6.38x is the right answer from
+  the wrong measurement; the branch's 6.35x compares 32 shards against 32. The
+  distinction does not matter for a threshold that is met by a wide margin. It
+  matters for PERF-030's 5 % regression gate.
+- Workers draw shards from a shared cursor rather than being dealt a fixed
+  share, which bounds the tail at one shard. Achieved parallelism at 8 workers
+  rises from about 7.0 to 7.9 of 8 CPUs.
+- `Config.LinePrefix` is compiled once, before any worker starts. It was
+  compiled per worker by `New`, which sets the error before assigning the
+  template -- and `scanShard`'s `Reset` then cleared it, so an unparseable
+  prefix was silently replaced by auto-detection. A serial `Parser` refused the
+  same `Config` and read nothing.
 
-**Remediation.** Two separate pieces of work, in order.
+One thing was tried and reverted: allocating every worker's read buffer as a
+single slab on the parent goroutine. It is the tidier shape and it was 1.8x
+slower in one configuration; the buffer is the hottest memory in the scan and a
+page lands on the NUMA node that first touches it. Each worker allocates its
+own.
 
-1. **Decouple the shard count from the worker count.** `--jobs 1` and
-   `--jobs 8` should divide the input the same way and differ only in how many
-   goroutines consume it. This is a correctness-of-measurement issue as much
-   as a performance one, and it is worth about 10 %.
-2. **Find the fixed per-call cost.** The working-set curve says it exists and
-   the shard experiment says it is not all per-shard setup. Profile
-   `ParallelScan` at 2, 4 and 8 workers on a large input before changing
-   anything else.
+### The correctness bug this uncovered
 
-Note also that `scanShard` calls `ensureFormat` per shard, which for
-`FormatAuto` **or** `FormatStderr` peeks up to `detectPeekBytes` (256 KiB) from
-the head of the source. These measurements use an explicit `FormatJSON` and so
-avoid it entirely; a stderr workload with auto-detected prefixes pays it 64
-times where the serial run pays it 8, and has not been measured.
+Raising the shard count exposed a silent loss in csvlog that had shipped in
+v1.0.0. Resynchronisation asked `looksLikeCSVLine` whether a line began a
+record, but that function asks whether a line **is** one -- a known column count
+and a severity in column 12. The first physical line of a record whose message
+contains a newline ends inside an open quote and fails it, so `resync` stepped
+over the record it had just found. Under `ParallelScan` the record was lost
+outright, because the previous shard had already stopped at that offset. On
+`main`, 26 shards over a 1.75 MB csvlog of multi-line records lose 6 records,
+identically at 1, 2, 4 and 8 workers.
+
+The loss scales with the **shard** count, not the worker count, which is why
+nothing caught it: the shard count was capped at `--jobs`, so the suite never
+built enough shards for a boundary to land inside a multi-line record.
+
+### What is still not settled
+
+`bench/RUNNER.md`'s dedicated runner still does not exist, and the machine
+above is shared -- a paused job is not a dedicated box, and `MACHINE.md` is
+still unfilled. **VAL-004 therefore still forbids publishing this as met.** It
+is recorded here as measured, with its conditions, and AC-019 stays open until
+the runner does exist.
+
+Two further caveats on the figure itself. It is a 16-core machine running 8
+workers, so the workers never contend for a physical core or share an SMT
+sibling and the runtime has spare cores of its own; AC-019 is stated for an
+**8-core** reference machine, which is a harder configuration. And the
+auto-detecting path is still unmeasured: `scanShard` resolves the format per
+shard, which for `FormatAuto` peeks 64 KiB and for stderr without a configured
+`LinePrefix` peeks 256 KiB and scores 18 templates against 200 lines. Every
+benchmark here passes an explicit `FormatJSON` and so never pays it.
 
 ## Memory (PERF-026 – PERF-028)
 
