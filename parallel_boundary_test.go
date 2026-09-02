@@ -152,31 +152,43 @@ func TestParallelScanDetectsFormatFromTheHead(t *testing.T) {
 // because the previous shard already stopped at that offset expecting this one
 // to take it. Nothing reads it, and the scan reports no error.
 //
-// It sweeps the WORKER count because that is what planShards derives the shard
-// count from. The loss needs a boundary to land inside a record whose message
-// spans lines, so it appears only once there are enough shards: at eight it
-// does not reproduce, at twenty-six it drops six records.
+// It sweeps the INPUT SIZE, not the worker count. When this test was written
+// planShards derived the shard count from --jobs, so sweeping workers was how
+// to reach enough shards for a boundary to land inside a record whose message
+// spans lines. It no longer does: the plan is a function of the input alone,
+// so every worker count now produces the SAME shards and a worker sweep would
+// run one configuration seven times over. Size is the axis that varies them.
+//
+// The worker sweep is kept underneath, because concurrency is still worth
+// varying -- it just no longer varies the thing this bug needs.
 func TestParallelScanKeepsMultiLineCSVRecords(t *testing.T) {
 	one := fixture(t, "csv/quotes-newlines-commas.csv")
 	require.Contains(t, string(one), "\nFROM t",
 		"the fixture must contain a record whose message spans lines, "+
 			"or this test cannot see the bug it exists for")
 
-	data := bytes.Repeat(one, 2000)
 	cfg := Config{Format: FormatCSV}
+	for _, reps := range []int{2000, 4793, 12000} {
+		data := bytes.Repeat(one, reps)
 
-	p := New(bytes.NewReader(data), cfg)
-	want := 0
-	for p.Next() {
-		want++
-	}
-	require.NoError(t, p.Err())
-	require.Positive(t, want)
+		p := New(bytes.NewReader(data), cfg)
+		want := 0
+		for p.Next() {
+			want++
+		}
+		require.NoError(t, p.Err())
+		require.Positive(t, want)
 
-	for _, workers := range []int{1, 2, 4, 8, 16, 26, 32} {
-		got, _ := collect(t, []io.ReaderAt{bytes.NewReader(data)}, cfg, workers)
-		assert.Len(t, got, want,
-			"%d workers: parallel scanning lost or doubled a record that spans lines",
-			workers)
+		shards := planShards([]io.ReaderAt{bytes.NewReader(data)})
+		require.Greater(t, len(shards), 4,
+			"%d bytes must plan into several shards for this to mean anything",
+			len(data))
+
+		for _, workers := range []int{1, 2, 3, 4, 8, 16} {
+			got, _ := collect(t, []io.ReaderAt{bytes.NewReader(data)}, cfg, workers)
+			assert.Len(t, got, want,
+				"%d shards, %d workers: parallel scanning lost or doubled a "+
+					"record that spans lines", len(shards), workers)
+		}
 	}
 }

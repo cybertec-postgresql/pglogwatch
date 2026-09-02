@@ -95,51 +95,6 @@ type unsizedReaderAt struct{ r io.ReaderAt }
 
 func (u unsizedReaderAt) ReadAt(p []byte, off int64) (int, error) { return u.r.ReadAt(p, off) }
 
-// TestParallelScanKeepsMultiLineCSVRecords is the regression for a silent loss
-// that survived to v1.0.0.
-//
-// Resynchronisation asked looksLikeCSVLine whether a line began a record, but
-// that function asks whether a line IS one -- a known column count, a severity
-// in column 12. The first physical line of a record whose message contains a
-// newline ends inside an open quote and fails it, so resync discarded the
-// record it had just found. The shard before it had already stopped at that
-// offset expecting this one to take it, so the record was simply gone.
-//
-// Nothing caught it because the loss scales with the SHARD count, and the shard
-// count used to be clamped to the worker count: the suite never made enough
-// shards. Sweeping the input size is what exposes it, so that is what this
-// does rather than sweeping --jobs.
-func TestParallelScanKeepsMultiLineCSVRecords(t *testing.T) {
-	one := fixture(t, "csv/quotes-newlines-commas.csv")
-	require.Contains(t, string(one), "\nFROM t",
-		"the fixture must contain a record whose message spans lines, "+
-			"or this test cannot see the bug it exists for")
-
-	cfg := Config{Format: FormatCSV}
-	for _, reps := range []int{2000, 4793, 12000} {
-		data := bytes.Repeat(one, reps)
-
-		p := New(bytes.NewReader(data), cfg)
-		want := 0
-		for p.Next() {
-			want++
-		}
-		require.NoError(t, p.Err())
-
-		shards := planShards([]io.ReaderAt{bytes.NewReader(data)})
-		require.Greater(t, len(shards), 4,
-			"%d bytes must plan into several shards for this to mean anything",
-			len(data))
-
-		for _, workers := range []int{1, 2, 3, 4, 8, 16} {
-			got, _ := collect(t, []io.ReaderAt{bytes.NewReader(data)}, cfg, workers)
-			assert.Len(t, got, want,
-				"%d shards, %d workers: parallel scanning lost or doubled a "+
-					"record that spans lines", len(shards), workers)
-		}
-	}
-}
-
 // TestParallelScanRejectsABadLinePrefix pins a second silent failure.
 //
 // New reports an unparseable log_line_prefix through Err and stops. It sets
