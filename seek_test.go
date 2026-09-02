@@ -266,3 +266,48 @@ func TestSeekReturnsTheResynchronisedOffset(t *testing.T) {
 func TestParserSatisfiesIOSeeker(t *testing.T) {
 	var _ io.Seeker = (*Parser)(nil)
 }
+
+// TestSeekDoesNotSkipAMultiLineCSVRecord is a regression for a silent loss.
+//
+// Resynchronisation asked looksLikeCSVLine whether a line began a record, but
+// that function answers a different question -- whether a line IS a whole
+// record, with a known column count and a severity in column 12. The first
+// physical line of a record whose message contains a newline ends inside an
+// open quote and fails it, so resync stepped over the record it had just
+// found and landed on the next one.
+//
+// Alone that is a resumption that loses one record. Under ParallelScan it is
+// worse: the shard before this offset stopped here believing the next shard
+// would take the record, so nothing reads it at all and the total is quietly
+// one short per boundary that lands in a multi-line record.
+func TestSeekDoesNotSkipAMultiLineCSVRecord(t *testing.T) {
+	data := bytes.Repeat(fixture(t, "csv/quotes-newlines-commas.csv"), 8)
+	cfg := Config{Format: FormatCSV}
+	offs, msgs := recordOffsets(t, data, cfg)
+
+	// Find a record whose text spans physical lines; that is the one whose
+	// first line the old test rejected.
+	idx := -1
+	for i := range offs[:len(offs)-1] {
+		if bytes.Contains(data[offs[i]:offs[i+1]], []byte("\nFROM t")) {
+			idx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, idx, 1,
+		"the fixture must hold a record spanning lines, preceded by another")
+
+	// Seek into the record BEFORE it, which is what a shard boundary landing
+	// mid-record does.
+	mid := offs[idx-1] + (offs[idx]-offs[idx-1])/2
+	require.Greater(t, mid, offs[idx-1])
+
+	p := New(bytes.NewReader(data), cfg)
+	got, err := p.Seek(mid, io.SeekStart)
+	require.NoError(t, err)
+	assert.Equal(t, offs[idx], got,
+		"resync must land on the multi-line record, not step over it")
+
+	require.True(t, p.Next())
+	assert.Equal(t, msgs[idx], string(p.Record().Message))
+}
