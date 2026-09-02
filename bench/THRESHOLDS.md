@@ -105,12 +105,20 @@ not the code.**
 
 | corpus | 1 worker | 8 workers | speedup | CPUs busy |
 |---|---:|---:|---:|---:|
-| 8 x 4 MiB (32 MB) | 111.7 ms | 16.35 ms | **6.83x** median, 6.82x best of 30 | 7.91 of 8 |
-| 8 x 16 MiB (128 MB) | 451.5 ms | 65.32 ms | **6.91x** median, 6.88x best of 30 | 7.95 of 8 |
+| 8 x 4 MiB (32 MB) | 111.7 ms | 16.35 ms | **6.83x** median, 6.82x fastest-run | 7.91 of 8 |
+| 8 x 16 MiB (128 MB) | 451.5 ms | 65.32 ms | **6.91x** median, 6.88x fastest-run | 7.95 of 8 |
 
 Threadripper 2950X, 16 cores, `GOMAXPROCS=8`, `performance` governor, boost
-disabled, no other workload. Median and best agree to 0.15 %, and each side
-spreads about 2 %.
+disabled, no other workload, 30 interleaved repetitions. Each side spreads
+about 2 %.
+
+Two estimates of the same ratio are given. The first divides the medians. The
+second divides each side's *fastest* run, which is not a best case -- taking
+the quickest 1-worker run shrinks the numerator, so it can land either side of
+the median ratio -- but is the better estimate of the truth, because
+interference only ever makes a run slower. They agree here to 0.15 %; where
+they do not, the machine was busy and the number describes it rather than the
+code.
 
 ### What the earlier 4x was
 

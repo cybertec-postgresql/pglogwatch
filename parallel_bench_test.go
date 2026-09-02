@@ -100,8 +100,8 @@ const (
 	// times noisier than the side it is divided into.
 	scalingSpan = 250 * time.Millisecond
 
-	// scalingNoiseRatio is how far the median and best-case speedups may
-	// diverge before the run is called too noisy to publish (VAL-004).
+	// scalingNoiseRatio is how far the two estimates of the ratio may diverge
+	// before the run is called too noisy to draw a verdict from.
 	scalingNoiseRatio = 1.15
 )
 
@@ -258,14 +258,20 @@ func (s scalingSummary) String() string {
 
 // measureSpeedup runs the two sides alternately so that drift -- boost state,
 // thermals, a page cache still filling -- lands on both of them equally, and
-// returns the median and best-case ratios.
+// returns two estimates of the same ratio.
 //
-// The median is the headline. The best case is reported beside it because for
-// a CPU-bound benchmark the minimum is the least noise-contaminated estimator:
-// when the two disagree, the run measured the machine rather than the code.
+// The median is the headline. Beside it is the ratio of each side's FASTEST
+// run, which is a genuinely different quantity and not a best case: taking the
+// quickest 1-worker run shrinks the numerator, so it can land either side of
+// the median ratio. It is reported because interference only ever makes a run
+// slower, which makes each side's minimum the best estimate of its uncontended
+// time and their ratio the best estimate of the true speedup.
+//
+// Two estimators of one quantity that disagree mean the run measured the
+// machine rather than the code. That is the whole point of printing both.
 func measureSpeedup(ctx context.Context, t *testing.T, srcs []io.ReaderAt,
 	cfg Config, need, reps int,
-) (median, best float64) {
+) (median, uncontended float64) {
 	t.Helper()
 
 	iters1 := calibrateIters(ctx, t, srcs, cfg, 1)
@@ -288,15 +294,15 @@ func measureSpeedup(ctx context.Context, t *testing.T, srcs []io.ReaderAt,
 	t.Logf("  %d workers: %s (%d calls/sample)", need, many, itersN)
 
 	median = float64(one.median) / float64(many.median)
-	best = float64(one.lo) / float64(many.lo)
-	t.Logf("  speedup %.2fx (median), %.2fx (best of %d)", median, best, reps)
+	uncontended = float64(one.lo) / float64(many.lo)
+	t.Logf("  speedup %.2fx (median of %d), %.2fx (fastest run of each side)",
+		median, reps, uncontended)
 
-	if ratio := max(median, best) / min(median, best); ratio > scalingNoiseRatio {
-		t.Logf("  WARNING: median and best-case speedups differ by %.0f%%; this run "+
-			"measured the machine, not the code, and must not be published (VAL-004)",
-			100*(ratio-1))
+	if ratio := max(median, uncontended) / min(median, uncontended); ratio > scalingNoiseRatio {
+		t.Logf("  WARNING: the two estimates differ by %.0f%%; this run measured "+
+			"the machine, not the code", 100*(ratio-1))
 	}
-	return median, best
+	return median, uncontended
 }
 
 // TestParallelScanScales measures AC-019 and PERF-029.
@@ -356,7 +362,7 @@ func TestParallelScanScales(t *testing.T) {
 	// whether that cost is still there; if it is gone the two converge.
 	//
 	// The first is the size AC-019 has been measured at, and is the headline.
-	var headline, headlineBest float64
+	var headline, headlineUncontended float64
 	for i, bytesPerFile := range []int{4 << 20, 16 << 20} {
 		data := bytes.Repeat(one, bytesPerFile/len(one))
 		srcs := make([]io.ReaderAt, need)
@@ -366,9 +372,9 @@ func TestParallelScanScales(t *testing.T) {
 		t.Logf("%d files x %d MiB (%d MiB total):",
 			need, bytesPerFile>>20, (need*bytesPerFile)>>20)
 
-		median, best := measureSpeedup(t.Context(), t, srcs, cfg, need, reps)
+		median, uncontended := measureSpeedup(t.Context(), t, srcs, cfg, need, reps)
 		if i == 0 {
-			headline, headlineBest = median, best
+			headline, headlineUncontended = median, uncontended
 		}
 	}
 
@@ -382,11 +388,11 @@ func TestParallelScanScales(t *testing.T) {
 			"on %d cores, so run it as: GOMAXPROCS=%d go test -run TestParallelScanScales .",
 			headline, gomaxprocs, need, need, need)
 	}
-	if noise := max(headline, headlineBest) / min(headline, headlineBest); noise > scalingNoiseRatio {
-		t.Skipf("measured %.2fx median against %.2fx best, %.0f%% apart: this machine "+
-			"was busy during the run, so the number describes the machine. Retry on an "+
-			"idle machine, or use bench/pinned-run.sh",
-			headline, headlineBest, 100*(noise-1))
+	if noise := max(headline, headlineUncontended) / min(headline, headlineUncontended); noise > scalingNoiseRatio {
+		t.Skipf("measured %.2fx from the medians against %.2fx from the fastest runs, "+
+			"%.0f%% apart: this machine was busy during the run, so the number "+
+			"describes the machine. Retry on an idle machine, or use bench/pinned-run.sh",
+			headline, headlineUncontended, 100*(noise-1))
 	}
 	// PERF-029's 0.75 of linear on 8 cores; AC-019 states the same bound as
 	// 6x. The assertion is the requirement itself, not a tighter number,
