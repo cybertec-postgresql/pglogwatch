@@ -26,6 +26,13 @@ START_REF=""
 restore() {
 	[ "$RESTORED" = 1 ] && return
 	RESTORED=1
+	# Nothing was pinned, so say nothing. Printing "restoring" after an exit
+	# that never touched the clocks reads, on a shared machine, as though it
+	# had -- and the next person to see it has no way to tell.
+	if [ "${#SAVED_GOV_FILES[@]}" -eq 0 ]; then
+		[ -n "$START_REF" ] && git checkout -q "$START_REF" 2>/dev/null
+		return
+	fi
 	echo
 	echo "== restoring"
 	for i in "${!SAVED_GOV_FILES[@]}"; do
