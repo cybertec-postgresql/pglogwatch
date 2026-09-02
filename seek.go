@@ -152,7 +152,7 @@ func (p *Parser) resync() {
 func (p *Parser) isRecordStart(line []byte) bool {
 	switch p.format {
 	case FormatCSV:
-		return looksLikeCSVLine(line)
+		return startsCSVRecord(line)
 	case FormatJSON:
 		return len(line) > 0 && line[0] == '{'
 	default:
@@ -162,4 +162,32 @@ func (p *Parser) isRecordStart(line []byte) bool {
 		// second answer that can disagree.
 		return !p.isContinuationLine(line)
 	}
+}
+
+// startsCSVRecord reports whether a line BEGINS a csvlog record.
+//
+// It is deliberately weaker than looksLikeCSVLine, and the difference is a
+// lost record rather than a matter of taste. looksLikeCSVLine asks whether a
+// line IS a whole record -- a known column count, a severity in column 12 --
+// which is the right question for format detection and the wrong one here: the
+// first physical line of a record whose message contains a newline ends inside
+// an open quote and has too few columns, so it fails that test. Resynchronise
+// with it and the record that was just found correctly is discarded instead,
+// and it is lost for good, because the shard before this one stopped at that
+// same offset believing this one would take it.
+//
+// The loss is silent and it scales with the shard count: sixteen shards over a
+// 4 MB csvlog of multi-line records dropped three records, at every worker
+// count, while every count was reported as healthy.
+//
+// A timestamp followed by a comma is what actually separates the start of a
+// csvlog record from a continuation line, because a continuation is the inside
+// of a quoted field and a quoted field's contents cannot begin a record. A log
+// message that embeds a newline followed by something shaped exactly like a
+// timestamp and a comma would still fool this, as it fools any resynchronisation
+// that starts mid-file; it is not a new hazard, and it is far rarer than a
+// message that merely wraps.
+func startsCSVRecord(line []byte) bool {
+	_, n, ok := scanTimestamp(line)
+	return ok && n < len(line) && line[n] == ','
 }

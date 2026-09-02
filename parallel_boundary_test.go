@@ -118,3 +118,39 @@ func TestParallelScanDetectsFormatFromTheHead(t *testing.T) {
 		})
 	}
 }
+
+// TestParallelScanKeepsMultiLineCSVRecords is the parallel half of the loss
+// that TestSeekDoesNotSkipAMultiLineCSVRecord pins at the Seek level, and it
+// is the one that matters to a user: a resumption that skips a record loses
+// one record, but a shard that skips its first record loses it outright,
+// because the previous shard already stopped at that offset expecting this one
+// to take it. Nothing reads it, and the scan reports no error.
+//
+// It sweeps the WORKER count because that is what planShards derives the shard
+// count from. The loss needs a boundary to land inside a record whose message
+// spans lines, so it appears only once there are enough shards: at eight it
+// does not reproduce, at twenty-six it drops six records.
+func TestParallelScanKeepsMultiLineCSVRecords(t *testing.T) {
+	one := fixture(t, "csv/quotes-newlines-commas.csv")
+	require.Contains(t, string(one), "\nFROM t",
+		"the fixture must contain a record whose message spans lines, "+
+			"or this test cannot see the bug it exists for")
+
+	data := bytes.Repeat(one, 2000)
+	cfg := Config{Format: FormatCSV}
+
+	p := New(bytes.NewReader(data), cfg)
+	want := 0
+	for p.Next() {
+		want++
+	}
+	require.NoError(t, p.Err())
+	require.Positive(t, want)
+
+	for _, workers := range []int{1, 2, 4, 8, 16, 26, 32} {
+		got, _ := collect(t, []io.ReaderAt{bytes.NewReader(data)}, cfg, workers)
+		assert.Len(t, got, want,
+			"%d workers: parallel scanning lost or doubled a record that spans lines",
+			workers)
+	}
+}
