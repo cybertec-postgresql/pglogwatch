@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -49,6 +50,13 @@ const readChunk = `SELECT pg_read_file($1, $2, $3)`
 // into one stream for a parser -- the same shape pglogwatch.FileSet produces
 // locally, so a caller can switch between them without changing anything else.
 //
+// Without Config.Follow the reader ends at the last byte of the last file.
+// With it, the reader instead re-lists the directory every Config.PollInterval
+// and keeps going, blocking in Read until there is something to deliver; it
+// returns io.EOF when ctx is done. A follower holds back a trailing line that
+// has no newline yet rather than delivering half a record, so the smallest unit
+// it emits is always a complete line.
+//
 // # Limitations
 //
 // pg_read_file returns text rather than bytea, so a log containing bytes that
@@ -69,6 +77,14 @@ const readChunk = `SELECT pg_read_file($1, $2, $3)`
 func Open(ctx context.Context, conn Conn, cfg Config) (io.ReadCloser, error) {
 	if cfg.Dir == "" {
 		return nil, ErrNoDir
+	}
+	// A follower re-lists the directory on every poll and decides what is
+	// new from the stored offsets. With nowhere to store them every pass
+	// would start each file from the beginning and deliver the whole
+	// directory again, so the fallback is not a convenience here -- it is
+	// what makes Follow correct.
+	if cfg.Follow && cfg.Offsets == nil {
+		cfg.Offsets = newMemOffsets()
 	}
 	names, err := listNames(ctx, conn, cfg)
 	if err != nil {
@@ -136,6 +152,16 @@ type remoteReader struct {
 func (r *remoteReader) Read(p []byte) (int, error) {
 	for {
 		if err := r.ctx.Err(); err != nil {
+			// Cancellation means different things to the two readers.
+			// A one-shot reader was going to finish on its own, so
+			// being cancelled cost the caller data and is an error. A
+			// follower never finishes on its own -- cancelling it is
+			// the only way to stop it, and the designed way. Reporting
+			// that as an error would make every caller special-case
+			// the normal shutdown path.
+			if r.cfg.Follow {
+				return 0, io.EOF
+			}
 			return 0, err
 		}
 		if n := r.drain(p); n > 0 {
@@ -145,13 +171,51 @@ func (r *remoteReader) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		if r.curPath == "" && !r.nextFile() {
-			r.done = true
+			if !r.cfg.Follow {
+				r.done = true
+				continue
+			}
+			if !r.wait() {
+				return 0, io.EOF // a cancelled follower ends cleanly
+			}
+			if err := r.relist(); err != nil {
+				return 0, err
+			}
 			continue
 		}
 		if err := r.fetch(); err != nil {
 			return 0, err
 		}
 	}
+}
+
+// wait sleeps one poll interval. It reports whether the reader should carry on.
+func (r *remoteReader) wait() bool {
+	select {
+	case <-r.ctx.Done():
+		return false
+	case <-time.After(r.cfg.pollInterval()):
+		return true
+	}
+}
+
+// relist re-reads the directory so a follower sees files that have grown and
+// files that have appeared since the last pass.
+//
+// Everything that decides what to read next already lives in nextFile, which
+// compares each listed size against the stored offset: a file whose size still
+// equals its offset is skipped, one that has grown resumes from the offset, and
+// one that has shrunk is re-read from the start as a truncate-and-reuse
+// rotation. Re-listing therefore needs to do nothing but replace the slice and
+// rewind the index -- the follow path and the first pass take the same
+// decisions from the same evidence.
+func (r *remoteReader) relist() error {
+	names, err := listNames(r.ctx, r.conn, r.cfg)
+	if err != nil {
+		return err
+	}
+	r.names, r.idx = names, 0
+	return nil
 }
 
 // drain copies out complete lines only.
@@ -237,12 +301,49 @@ func (r *remoteReader) fetch() error {
 }
 
 // finishFile marks the current file complete.
+//
+// "Complete" means different things to a follower. A one-shot reader that runs
+// out of bytes has reached the end of the file, and a trailing line with no
+// newline is the file's last line (FMT-009): flushing it is right. A follower
+// that runs out of bytes has only reached the end of what the server has
+// written SO FAR, and a trailing line with no newline is far more likely to be
+// a record the server is still writing than a file that ends mid-line.
+//
+// Flushing it there would split one log record into two: half delivered now,
+// half prepended to the next poll's chunk. Both halves parse as malformed, and
+// the event they describe is counted zero times or twice. So a follower rewinds
+// past the partial line instead and drops it -- the recorded offset points at
+// its first byte, and the next poll re-reads it whole.
 func (r *remoteReader) finishFile() {
+	if r.cfg.Follow {
+		if tail := r.partialTail(); tail > 0 {
+			r.curOff -= int64(tail)
+			r.pending = r.pending[:len(r.pending)-tail]
+		}
+		if r.cfg.Offsets != nil && r.curPath != "" {
+			r.cfg.Offsets.Set(r.curPath, r.curOff)
+		}
+		// Not flush: what is left is whole lines, which drain delivers on
+		// its own terms. Setting it would re-arm the partial-line flush
+		// this branch exists to avoid.
+		r.flush = false
+		r.curPath = ""
+		return
+	}
 	if r.cfg.Offsets != nil && r.curPath != "" {
 		r.cfg.Offsets.Set(r.curPath, r.curOff)
 	}
 	r.flush = true
 	r.curPath = ""
+}
+
+// partialTail is the number of bytes held after the last newline: the start of
+// a record whose remainder has not been written yet.
+func (r *remoteReader) partialTail() int {
+	if i := bytes.LastIndexByte(r.pending, '\n'); i >= 0 {
+		return len(r.pending) - (i + 1)
+	}
+	return len(r.pending)
 }
 
 // nextFile moves to the next file with unread bytes. It reports whether it
