@@ -89,8 +89,8 @@ func TestFollowHoldsBackAPartialTrailingLine(t *testing.T) {
 	const chunk = 1 << 20
 	const p = "/var/log/pg/postgresql.json"
 	whole := "{\"error_severity\":\"LOG\",\"message\":\"complete\"}\n"
-	half := "{\"error_severity\":\"LOG\",\"messa"        // no newline yet
-	rest := "ge\":\"torn\"}\n"                           // arrives next poll
+	half := "{\"error_severity\":\"LOG\",\"messa" // no newline yet
+	rest := "ge\":\"torn\"}\n"                    // arrives next poll
 
 	mock := newMock(t)
 	expectLogDir(mock, [2]any{"postgresql.json", int64(len(whole + half))})
