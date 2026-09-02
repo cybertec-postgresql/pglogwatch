@@ -44,8 +44,8 @@ tasks:
     # through ru_maxrss and Windows does not provide. The container supplies
     # all three and a platform that can measure them.
     #
-    # It is NOT the pinned runner (INF-002), so figures from it may not be
-    # published as meeting a threshold (VAL-004).
+    # Record which machine produced a figure from it (TST-013, TST-014); a
+    # container inherits the host's clocks and neighbours.
     cmds:
       - docker build -t {{.IMAGE}} .
       - >-

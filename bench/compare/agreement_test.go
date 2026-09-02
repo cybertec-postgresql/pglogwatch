@@ -76,7 +76,7 @@ func parseSeverities(t *testing.T, path string) map[string]int64 {
 // TestAllThreeToolsAgree is AC-010 in full.
 //
 // It needs pgbadger and pgweasel installed, so it skips where they are not --
-// which is everywhere except the pinned runner (INF-003). Skipping is stated
+// which is anywhere the pinned baseline versions are absent (INF-003). Skipping is stated
 // rather than silent: a green run on a machine without the baselines has not
 // verified AC-010, and pretending otherwise is exactly what VAL-010 forbids.
 func TestAllThreeToolsAgree(t *testing.T) {

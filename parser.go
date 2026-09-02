@@ -80,7 +80,15 @@ type Parser struct {
 // the log destination from the first non-empty line. New does no I/O: the
 // first read happens on the first call to [Parser.Next], so a Parser over a
 // slow or empty source costs nothing until it is used.
-func New(r io.Reader, cfg Config) *Parser {
+func New(r io.Reader, cfg Config) *Parser { return newParser(r, cfg, nil) }
+
+// newParser is New with Config.LinePrefix already compiled.
+//
+// It exists for ParallelScan, whose workers all share one template rather than
+// each compiling the same prefix -- and, more importantly, so that a prefix
+// that does not compile is reported once by ParallelScan instead of being
+// swallowed by every worker's Reset.
+func newParser(r io.Reader, cfg Config, tpl *prefixTemplate) *Parser {
 	cfg.normalize()
 	p := &Parser{
 		cfg:    cfg,
@@ -88,18 +96,23 @@ func New(r io.Reader, cfg Config) *Parser {
 		sev:    newSeverityResolver(cfg.MessagesLang),
 	}
 	p.buf = newBuf(r, &p.cfg, &p.stats)
+	if tpl != nil {
+		p.prefix = tpl
+		p.detectedPrefix = tpl.String()
+		return p
+	}
 	if cfg.LinePrefix != "" {
 		// A prefix the caller supplied and got wrong is a configuration
 		// error, not bad input, so unlike a malformed line it is fatal
 		// and reported through Err (IFC-003).
-		tpl, err := compilePrefix(cfg.LinePrefix)
+		compiled, err := compilePrefix(cfg.LinePrefix)
 		if err != nil {
 			p.err = err
 			p.done = true
 			return p
 		}
-		p.prefix = tpl
-		p.detectedPrefix = tpl.String()
+		p.prefix = compiled
+		p.detectedPrefix = compiled.String()
 	}
 	return p
 }

@@ -10,6 +10,6 @@ import "os/exec"
 //
 // The results table renders 0 as "not measured" rather than as a number, since
 // reporting zero would read as "used no memory", which is worse than an
-// admitted gap. PERF-026 and PERF-027 are stated against the reference machine
+// admitted gap. PERF-026 and PERF-027 are stated against a Linux machine
 // of §6, which is not Windows.
 func platformPeakRSSKB(*exec.Cmd) int64 { return 0 }

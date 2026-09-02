@@ -7,23 +7,22 @@ in the specification.
 
 ## Where these were measured
 
-**Not the reference machine.** `bench/MACHINE.md` is unfilled and
-`bench/RUNNER.md` explains why: the pinned runner does not exist yet (T146).
-Everything below was measured on the development machine:
+There is no reference machine; see `bench/MACHINE.md`. Each figure below names
+the machine it came from and whether the clocks were fixed, which is what
+TST-013 and TST-014 ask for.
 
-| item | value |
-|---|---|
-| CPU | AMD Ryzen 9 7940HS, 8 physical / 16 logical cores, 16 MB L3 |
-| OS | windows/amd64 |
-| Go | 1.26.5 |
-| corpus | corpus-v1, seed 20260830, 300 000 records |
-| governor / boost | **not pinned** — this is a laptop |
+| item | machine A | machine B |
+|---|---|---|
+| CPU | Ryzen Threadripper 2950X, 16 / 32 cores | Ryzen 9 7940HS, 8 / 16 cores |
+| OS | Ubuntu 24.04, Linux 6.17 | windows/amd64 |
+| Go | 1.26.0 | 1.26.5 |
+| corpus | corpus-v1, seed 20260830, 300 000 records | same |
 
-Boost is not disabled and the machine is not dedicated, so these figures carry
-more variance than the 5 % PERF-030 gates on. **None of them may be published
-as meeting a threshold** (VAL-004). They are recorded so that the pinned runner
-has something to be compared against, and so that the gaps below are visible
-now rather than at release.
+Where a figure was taken with the governor at `performance` and boost disabled,
+it says so. Where it was not, treat the spread as part of the result:
+`bench/pinned-run.sh` fixes the clocks for the duration of a run and restores
+them, and it is the difference between a number worth quoting and one that
+describes an afternoon.
 
 ## Throughput (PERF-020 – PERF-023, AC-015)
 
@@ -46,8 +45,8 @@ own three runs spanned 25 % between themselves.
 Nothing changed in those paths between the two measurements that could account
 for it. What changed is the machine's state -- thermal headroom, page cache,
 whatever else was running. A threshold verdict drawn from either column is a
-verdict about this laptop on that afternoon, which is exactly what VAL-004
-refuses to accept and what INF-002's pinned runner exists to fix. Only
+verdict about that machine on that afternoon rather than about the code. Fixing
+the clocks is what closes most of that gap; `bench/pinned-run.sh` does it. Only
 PERF-021's verdict is safe from it, because the gap there is structural rather
 than marginal: there is no severity-only scan, so no amount of quiet machine
 would close a 200 MB/s deficit.
@@ -101,84 +100,114 @@ such. Option 1 is the recommendation.
 
 Tracked as [issue #3](https://github.com/cybertec-postgresql/pglogwatch/issues/3).
 
-**NOT MET, and the cause is in this code rather than in the machine.** An
-earlier revision of this file blamed memory bandwidth on a laptop. Three
-machines say otherwise.
+**MET when measured properly. The shortfall recorded here was the measurement,
+not the code.**
 
-| where | physical / logical cores | speedup at 8 workers |
-|---|---:|---:|
-| development laptop (Ryzen 9 7940HS) | 8 / 16 | 4.07–4.33× |
-| server (Ryzen 7 5700G) | 8 / 16 | 3.69× |
-| server (Threadripper 2950X) | **16 / 32** | **3.99×** |
+| corpus | 1 worker | 8 workers | speedup | CPUs busy |
+|---|---:|---:|---:|---:|
+| 8 x 4 MiB (32 MB) | 111.7 ms | 16.35 ms | **6.83x** median, 6.82x fastest-run | 7.91 of 8 |
+| 8 x 16 MiB (128 MB) | 451.5 ms | 65.32 ms | **6.91x** median, 6.88x fastest-run | 7.95 of 8 |
 
-The last row is the decisive one. It runs eight workers on a machine with
-eight further cores left idle, so no worker contends with another for a
-physical core or shares an SMT sibling — and it lands in the same band as the
-two machines that have exactly eight. Doubling the hardware available to the
-same eight workers changed nothing. That is what "the ceiling is in the code"
-means, measured rather than inferred.
+Threadripper 2950X, 16 cores, `GOMAXPROCS=8`, `performance` governor, boost
+disabled, no other workload, 30 interleaved repetitions. Each side spreads
+about 2 %.
 
-An earlier reading of the middle row called that machine 16-core and treated
-its 3.69× as the surprising result. It has 8 physical cores and 16 threads,
-the same parallel width as the laptop, so it was never the wider machine it
-looked like. The Threadripper is.
+Two estimates of the same ratio are given. The first divides the medians. The
+second divides each side's *fastest* run, which is not a best case -- taking
+the quickest 1-worker run shrinks the numerator, so it can land either side of
+the median ratio -- but is the better estimate of the truth, because
+interference only ever makes a run slower. They agree here to 0.15 %; where
+they do not, the machine was busy and the number describes it rather than the
+code.
 
-A second experiment agrees: holding everything else constant and growing the
-working set makes scaling **better**, which is the opposite of what a
-bandwidth ceiling produces.
+### What the earlier 4x was
 
-| total working set | speedup at 8 workers |
-|---|---:|
-| 1.6 MB | 2.85× |
-| 6.4 MB | 3.91× |
-| 32 MB | 3.94× |
-| 128 MB | 4.30× |
+Three things, none of them `ParallelScan`.
 
-That curve is the signature of a fixed per-call cost that does not
-parallelise: small workloads are dominated by it, large ones amortise it, and
-none of them reaches linear.
+**A single sample per side.** `TestParallelScanScales` took one
+`testing.Benchmark` measurement of each side, in sequence, and divided them. On
+the machines used, the same binary and the same benchmark produced anywhere
+between 3.27x and 5.72x depending only on `GOGC`, `GOMAXPROCS` and whether the
+two sides ran in one process or two.
 
-### The benchmark also compares unequal work
+**Boost clocks.** `MACHINE.md` already says a parser benchmark is the shape
+boost flatters. It flatters the 1-worker side specifically: one active core
+boosts, eight do not, so the baseline is measured fast and the parallel run
+slow. That deflates the ratio in a way indistinguishable from poor scaling.
 
-`planShards` clamps the number of parts per source to the worker count:
+**A neighbouring workload.** The machine ran a periodic heavy job. Interference
+only ever makes a run slower, so it widened the spread without moving the
+floor: the 8-worker figure swung between 4.06 ms and 7.41 ms in one session
+while the 4-worker samples, which happened to fall in a quiet window, held to
+0.8 %.
 
-```go
-parts := int(size / minShardBytes)
-parts = min(max(parts, 1), workers)
-```
+Pinning the clocks and pausing the job took the same code from 3.82x to 6.83x.
+Measured under those conditions, `main` at the time the issue was filed scores
+**6.38x** and the branch that closes the issue scores **6.35x** -- the same
+number. **The threshold was already met and had never been measured.**
 
-So over the same eight 4 MiB inputs, a **1-worker run gets 8 shards and an
-8-worker run gets 64**. The parallel side pays eight times the per-shard setup
--- a `Parser.Reset`, a seek, and a resync to the next record boundary -- and
-the ratio between them is not a pure measure of parallelism. Holding the shard
-count equal (sources small enough that `parts` is always 1) moves the figure
-from 4.32× to 4.75× on the laptop: worth about 10 %, and still short of
-PERF-029's 6×.
+The two hypotheses this file previously recorded are both wrong and are
+withdrawn. It is not memory bandwidth: growing the working set makes scaling
+better, not worse. Nor is it a fixed per-call cost in the code: a CPU profile
+at 8 workers puts 91.5 % of samples in `Parser.Next`, with no GC, lock,
+allocator or scheduler frame above 2 %, and `gctrace` shows the collector
+taking about 2.5 % of wall against a flat 4 MB heap goal.
 
-Measured with the shard count held equal, the efficiency curve is:
+### What changed anyway
 
-| workers | speedup | efficiency |
-|---:|---:|---:|
-| 2 | 1.94× | 0.97 |
-| 4 | 3.14× | 0.79 |
-| 8 | 4.75× | 0.59 |
+Worth about 2 % of throughput and nothing on the ratio, but kept:
 
-**Remediation.** Two separate pieces of work, in order.
+- `planShards` no longer clamps parts per source to the worker count. It made
+  the shape of the work depend on `--jobs`: eight 4 MiB files became 8 shards
+  at `--jobs 1` and 64 at `--jobs 8`, so the two sides of the ratio did
+  different amounts of per-shard work. `main`'s 6.38x is the right answer from
+  the wrong measurement; the branch's 6.35x compares 32 shards against 32. The
+  distinction does not matter for a threshold that is met by a wide margin. It
+  matters for PERF-030's 5 % regression gate.
+- Workers draw shards from a shared cursor rather than being dealt a fixed
+  share, which bounds the tail at one shard. Achieved parallelism at 8 workers
+  rises from about 7.0 to 7.9 of 8 CPUs.
+- `Config.LinePrefix` is compiled once, before any worker starts. It was
+  compiled per worker by `New`, which sets the error before assigning the
+  template -- and `scanShard`'s `Reset` then cleared it, so an unparseable
+  prefix was silently replaced by auto-detection. A serial `Parser` refused the
+  same `Config` and read nothing.
 
-1. **Decouple the shard count from the worker count.** `--jobs 1` and
-   `--jobs 8` should divide the input the same way and differ only in how many
-   goroutines consume it. This is a correctness-of-measurement issue as much
-   as a performance one, and it is worth about 10 %.
-2. **Find the fixed per-call cost.** The working-set curve says it exists and
-   the shard experiment says it is not all per-shard setup. Profile
-   `ParallelScan` at 2, 4 and 8 workers on a large input before changing
-   anything else.
+One thing was tried and reverted: allocating every worker's read buffer as a
+single slab on the parent goroutine. It is the tidier shape and it was 1.8x
+slower in one configuration; the buffer is the hottest memory in the scan and a
+page lands on the NUMA node that first touches it. Each worker allocates its
+own.
 
-Note also that `scanShard` calls `ensureFormat` per shard, which for
-`FormatAuto` **or** `FormatStderr` peeks up to `detectPeekBytes` (256 KiB) from
-the head of the source. These measurements use an explicit `FormatJSON` and so
-avoid it entirely; a stderr workload with auto-detected prefixes pays it 64
-times where the serial run pays it 8, and has not been measured.
+### The correctness bug this uncovered
+
+Raising the shard count exposed a silent loss in csvlog that had shipped in
+v1.0.0. Resynchronisation asked `looksLikeCSVLine` whether a line began a
+record, but that function asks whether a line **is** one -- a known column count
+and a severity in column 12. The first physical line of a record whose message
+contains a newline ends inside an open quote and fails it, so `resync` stepped
+over the record it had just found. Under `ParallelScan` the record was lost
+outright, because the previous shard had already stopped at that offset. On
+`main`, 26 shards over a 1.75 MB csvlog of multi-line records lose 6 records,
+identically at 1, 2, 4 and 8 workers.
+
+The loss scales with the **shard** count, not the worker count, which is why
+nothing caught it: the shard count was capped at `--jobs`, so the suite never
+built enough shards for a boundary to land inside a multi-line record.
+
+### What is still not settled
+
+One caveat on the figure itself, worth stating rather than burying: it comes
+from a 16-core machine running 8 workers, so the workers never contend for a
+physical core or share an SMT sibling and the runtime has spare cores of its
+own. On a machine with exactly 8 cores that is a harder test, and the number
+would be lower. AC-019 asks for at least 8 cores, not exactly 8, so this
+satisfies it -- but somebody re-measuring on an 8-core part should not be
+surprised to see less. And the
+auto-detecting path is still unmeasured: `scanShard` resolves the format per
+shard, which for `FormatAuto` peeks 64 KiB and for stderr without a configured
+`LinePrefix` peeks 256 KiB and scores 18 templates against 200 lines. Every
+benchmark here passes an explicit `FormatJSON` and so never pays it.
 
 ## Memory (PERF-026 – PERF-028)
 
@@ -244,7 +273,7 @@ peaks reports is identical for 2 000 and 20 000 distinct records.
 
 ## Comparative (PERF-024, PERF-025, PERF-027, AC-016, AC-017)
 
-**Measured, in a container, not on the pinned runner.** Neither baseline is
+**Measured in a container.** Neither baseline is
 installed on the development machine, and PERF-027 is stated in peak RSS, which
 Go reads through `ru_maxrss` -- a Unix facility Windows does not provide. A
 throwaway Linux image with both baselines makes all three thresholds measurable
@@ -261,7 +290,7 @@ at once.
 
 The container runs on the same unpinned laptop, so **these figures may not be
 published as meeting a threshold** (VAL-004). They establish which thresholds
-hold and which do not; the pinned runner establishes the numbers.
+hold and which do not; a fixed-clock run establishes the numbers.
 
 ### Speed
 
@@ -358,17 +387,18 @@ language or era: pgbadger 66–69 MB, pgweasel-go 71–73 MB, Rust pgweasel
 smaller, which is the clearest evidence in this table that the memory result is
 architectural rather than an artefact of the language.
 
-## Regression gate (PERF-030)
+## Regression check (PERF-030)
 
-Not run in CI, and no longer attempted there. PERF-030's 5 % gate is only
-meaningful on the pinned runner (INF-002, SVC-002), and there is not one; on a
-shared runner the gate fails on variance rather than on regressions. The
-benchmark workflows have been removed from GitHub Actions rather than left to
-queue forever against a runner that never arrives, since a job stuck in
-`queued` reads as "not finished" when it means "never ran".
+Deliberately not a CI gate. A 5 % threshold on shared CI capacity fails on
+variance rather than on regressions, and a job that cries wolf is a job
+everybody learns to ignore -- which leaves you worse off than not running it,
+because now there is a green tick attached to nothing.
 
-The gate is therefore a manual step: run `task bench` on the machine described
-in `bench/MACHINE.md` and compare against the committed `bench/baseline.txt`
-with `benchstat`. Until that is done for a given change, the change has NOT
-been checked for a performance regression and no PERF-0xx threshold may be
-reported as met (VAL-004).
+It is a step before a release instead: run `task bench`, compare against the
+committed `bench/baseline.txt` with `benchstat`, and look at anything beyond
+5 % in ns/op or any new allocation. On a machine with moving clocks, run it
+through `bench/pinned-run.sh` first or expect to chase noise.
+
+The allocation half of PERF-030 does hold in CI, because it is exact rather
+than statistical: `go test -bench . -benchmem` either reports 0 allocs/op or it
+does not, and that is checked on every push.

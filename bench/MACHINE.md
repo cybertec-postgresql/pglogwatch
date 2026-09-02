@@ -1,80 +1,62 @@
-# Reference machine
-
-TST-014 requires this specification to be pinned and reproduced verbatim in any
-published benchmark claim. TST-013 requires every results table to cite it.
+# Machines
 
 A throughput figure without a machine is not a measurement, it is an anecdote:
 the same corpus on the same code varies by more than a factor of two between a
-laptop under thermal limits and a pinned server, and PERF-029's scaling
-threshold is bounded by memory bandwidth rather than by the code at all.
+thermally limited box and one with its clocks fixed. TST-013 requires every
+results table to cite the machine it came from, and TST-014 requires that
+machine to be recorded here.
 
-## Status
+That is the whole requirement. There is no reference machine and no dedicated
+runner: measure on what you have, fix the clocks for the duration if you can,
+and say which machine and which conditions produced the number. Different
+machines are expected. Unstated ones are not.
 
-**Not yet provisioned.** INF-002 and SVC-002 call for a dedicated, pinned,
-self-hosted runner; T146 of the implementation plan is the task that acquires
-it. Until then:
+## Measured on
 
-- the comparative table (`task bench-compare`) runs anywhere and reports what
-  it could measure, marking the rest as not measured;
-- no figure produced on an unpinned machine may be published as meeting a
-  PERF-0xx threshold (VAL-004);
-- the scaling assertion in `TestParallelScanScales` only enforces PERF-029 when
-  `PGLOGWATCH_BENCH_MACHINE=1` is set, which is set on the pinned runner and
-  nowhere else. Elsewhere it measures, logs and skips.
+| | A | B |
+|---|---|---|
+| CPU | AMD Ryzen Threadripper 2950X | AMD Ryzen 9 7940HS |
+| cores / threads | 16 / 32 | 8 / 16 |
+| OS | Ubuntu 24.04, Linux 6.17 | Windows 11 |
+| Go | 1.26.0 | 1.26.5 |
+| role | the figures published in `THRESHOLDS.md` | development, correctness only |
 
-Fill in the table below when the runner exists, and record the date. Changing
-any row invalidates comparison with figures published before the change, so
-treat an edit here the way you would treat a corpus version bump.
+Machine A's numbers were taken with the governor at `performance`, boost
+disabled and no other workload running. Both settings were restored afterwards;
+`bench/pinned-run.sh` does that automatically, including on Ctrl-C, which is
+what makes this safe to run on a machine somebody else also uses.
 
-## Specification
+Peak RSS (PERF-026, PERF-027) is measured through `ru_maxrss` and so is
+Linux-only. Machine B cannot produce those figures at all.
 
-| item | value |
-|---|---|
-| hostname | _to be filled in_ |
-| CPU model | _to be filled in_ |
-| physical cores | _to be filled in_ |
-| logical cores | _to be filled in_ |
-| CPU governor | `performance`, fixed |
-| turbo / boost | disabled where the platform allows |
-| SMT / hyper-threading | _to be filled in_ |
-| RAM | at least 32 GB, so the corpus fits in page cache (INF-002) |
-| filesystem | _to be filled in_ |
-| kernel | _to be filled in_ |
-| Go | _to be filled in_ |
-| Perl (pgbadger) | _to be filled in_ (PLT-003) |
-| Rust or prebuilt pgweasel | _to be filled in_ (PLT-004) |
-| pgbadger version | _to be filled in_ (INF-003, pinned) |
-| pgweasel version | _to be filled in_ (INF-003, pinned) |
-| date pinned | _to be filled in_ |
-
-## Why these settings
-
-**CPU governor and boost.** A parser benchmark is short and CPU-bound, which is
-exactly the shape that boost clocks flatter. Leaving boost enabled makes the
-first run of a session faster than the tenth and turns a 5 % regression gate
-(PERF-030) into a coin toss.
-
-**At least 32 GB of RAM.** The corpus must fit in page cache, or the benchmark
-measures the disk. INF-002 requires it for that reason, not for headroom.
-
-**Pinned tool versions.** pgbadger and pgweasel are the baselines PERF-024 and
-PERF-025 are stated against. If either moves between runs, a change in the ratio
-cannot be attributed, and the threshold stops meaning anything.
-
-**Dedicated and self-hosted.** SVC-002 says shared CI runners have too much
-variance for a 5 % gate. That is the whole reason for a separate runner: the
-gate is only useful if a failure means a regression rather than a noisy
-neighbour.
-
-## Reproducing a published figure
+## Repeating a published figure
 
 ```bash
-task corpus                                  # regenerate corpus-v1 from its seed
-PGLOGWATCH_BENCH_MACHINE_NAME=<hostname> \
-PGLOGWATCH_BENCH_MACHINE=1 \
-  task bench-compare                         # measure and write bench/RESULTS.md
+task corpus                  # regenerate corpus-v1 from its seed
+bash bench/pinned-run.sh     # fixes clocks, measures, restores
 ```
 
-The results table names the corpus version and this file. If either differs from
-the published claim, the numbers are not comparable — say so rather than
-comparing them anyway (GUD-006, VAL-010).
+For the comparative table against pgbadger and pgweasel:
+
+```bash
+task bench-compare           # writes bench/RESULTS.md
+```
+
+If your machine differs from the ones above -- and it will -- the numbers will
+differ too. Say so rather than comparing them anyway (GUD-006, VAL-010). What
+should reproduce is the *shape*: near-linear scaling to 8 workers, zero
+allocations per record in steady state, and flat memory in input size.
+
+## Why fixing the clocks matters
+
+A parser benchmark is short and CPU-bound, which is exactly the shape that
+boost clocks flatter. It flatters one side of a scaling ratio more than the
+other: a single active core boosts, eight do not, so the 1-worker baseline is
+measured fast and the 8-worker run slow. That deflates the ratio in a way
+indistinguishable from poor parallel scaling, and it is what made AC-019 look
+unmet for months. See `THRESHOLDS.md`.
+
+A neighbouring workload does the same thing less predictably. Interference only
+ever makes a run slower, so the *minimum* of several runs is the best estimate
+of the uncontended time, and a large gap between the median and the minimum
+means the machine was busy rather than the code slow.

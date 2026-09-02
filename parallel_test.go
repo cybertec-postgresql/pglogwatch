@@ -23,6 +23,17 @@ import (
 // processing it twice are both silent, and both produce counts that are nearly
 // right, which is the hardest kind of wrong to notice.
 
+// shardedLogRecords is a record count whose bigLog output spans several
+// shards, so that the tests below actually cross a boundary.
+//
+// It has to be stated rather than assumed. planShards sizes shards from the
+// INPUT and no longer from the worker count, so a fixture that used to be cut
+// eight ways for eight workers is now cut by its own length -- and one that
+// fell under a single shard would keep passing while covering none of the
+// boundary behaviour it was written for. At roughly 44 bytes a record this is
+// about 1.7 MB, or seven shards.
+const shardedLogRecords = 40000
+
 // bigLog builds a log large enough that sharding it is meaningful, with each
 // record carrying its own index so duplicates and gaps are detectable.
 func bigLog(t *testing.T, n int) []byte {
@@ -73,7 +84,7 @@ func collect(t *testing.T, srcs []io.ReaderAt, cfg Config, workers int) ([]strin
 func TestParallelScanSeesEveryRecordExactlyOnce(t *testing.T) {
 	// IFC-008's core obligation. Checked at several worker counts, because a
 	// boundary bug can hide at one shard count and appear at another.
-	const n = 5000
+	const n = shardedLogRecords
 	data := bigLog(t, n)
 
 	for _, workers := range []int{1, 2, 3, 4, 8, 16} {
@@ -86,17 +97,28 @@ func TestParallelScanSeesEveryRecordExactlyOnce(t *testing.T) {
 			for _, m := range msgs {
 				seen[m]++
 			}
+			// Report the first few offenders rather than asserting once
+			// per record: at this size that is 40000 testify calls per
+			// worker count, and forty thousand identical failure lines
+			// are harder to read than one naming the boundary.
+			var wrong []string
 			for i := range n {
 				m := "record-" + itoaTest(i)
-				assert.Equal(t, 1, seen[m], "%s seen %d times", m, seen[m])
+				if seen[m] != 1 {
+					if len(wrong) < 5 {
+						wrong = append(wrong,
+							m+" seen "+itoaTest(seen[m])+" times")
+					}
+				}
 			}
+			assert.Empty(t, wrong, "records lost or doubled at a shard boundary")
 		})
 	}
 }
 func TestParallelScanMatchesASingleParser(t *testing.T) {
 	// The strongest statement of the same thing: the multiset of records is
 	// identical to what one parser produces.
-	data := bigLog(t, 2000)
+	data := bigLog(t, shardedLogRecords)
 
 	p := New(bytes.NewReader(data), Config{Format: FormatJSON})
 	var want []string

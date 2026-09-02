@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"runtime"
 	"sync"
+	"sync/atomic"
 )
 
 // Parallel scanning (IFC-008).
@@ -72,9 +73,21 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	shards := planShards(srcs, workers)
+	shards := planShards(srcs)
 	if len(shards) == 0 {
 		return nil
+	}
+	// A worker that could never draw a shard is a goroutine and a 64 KiB
+	// buffer spent on nothing.
+	workers = min(workers, len(shards))
+
+	// A log_line_prefix the caller got wrong is a configuration error, and
+	// compiling it once up here is what lets ParallelScan report it.
+	// Detecting it inside a worker cannot: scanShard's Reset clears the err
+	// New set, and the scan then silently auto-detects instead.
+	tpl, err := workerPrefix(cfg)
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -92,17 +105,31 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 		})
 	}
 
-	// Shards are handed out round-robin rather than in contiguous blocks, so
-	// that a set of files of unequal size does not leave one worker with all
-	// the large ones.
+	// Shards are drawn from a shared cursor rather than dealt out in advance.
+	// They are near-equal in BYTES by construction, but equal bytes are not
+	// equal time -- a shard dense in continuation lines costs more per byte
+	// than one of short records -- and wg.Wait means the slowest worker sets
+	// the wall clock. Drawing on demand bounds the tail at one shard instead
+	// of at the worst accumulation over a worker's whole share. The cursor is
+	// touched once per shard, not once per record.
+	var next atomic.Int64
 	for worker := range workers {
 		wg.Go(func() {
-			p := New(nil, cfg) // one parser per worker, reused across its shards
-			for i := worker; i < len(shards); i += workers {
-				if ctx.Err() != nil {
+			// Built HERE, on the worker's own goroutine, and deliberately
+			// so. Its read buffer is the hottest memory in the scan, and
+			// on a NUMA machine the page lands on the node that first
+			// touches it. Allocating all of them together on the parent --
+			// one slab, one allocation, which is otherwise the tidier
+			// shape -- puts every worker's buffer on one node and makes
+			// the scan 1.8x slower on a two-node part.
+			p := newParser(nil, cfg, tpl)
+			var rd shardReader
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(shards) || ctx.Err() != nil {
 					return
 				}
-				if err := scanShard(ctx, p, shards[i], worker, fn); err != nil {
+				if err := scanShard(ctx, p, &rd, shards[i], worker, fn); err != nil {
 					fail(err)
 					return
 				}
@@ -117,14 +144,75 @@ func ParallelScan(ctx context.Context, srcs []io.ReaderAt, cfg Config, workers i
 	return ctx.Err()
 }
 
+// workerPrefix compiles Config.LinePrefix once for every worker to share.
+//
+// Sharing the template is safe for the same reason compiledCandidates is:
+// scanPrefix reads it and writes only into the caller's Record and tzCache,
+// both of which are per-parser. Compiling it here rather than in each worker
+// also means a prefix the caller got wrong is reported, instead of every
+// worker quietly falling back to detection.
+func workerPrefix(cfg Config) (*prefixTemplate, error) {
+	if cfg.LinePrefix == "" {
+		return nil, nil
+	}
+	return compilePrefix(cfg.LinePrefix)
+}
+
+// shardReader is io.SectionReader without an allocation per shard.
+//
+// A parser needs only Read and Seek from its source (see Parser.Seek), never
+// ReadAt or Size, so one of these is re-pointed at each shard in turn rather
+// than a fresh SectionReader being built for every one.
+type shardReader struct {
+	src  io.ReaderAt
+	size int64
+	off  int64 // where the next Read starts
+}
+
+func (r *shardReader) reset(src io.ReaderAt, size int64) {
+	r.src, r.size, r.off = src, size, 0
+}
+
+func (r *shardReader) Read(p []byte) (int, error) {
+	if r.off >= r.size {
+		return 0, io.EOF
+	}
+	if over := r.size - r.off; int64(len(p)) > over {
+		p = p[:over]
+	}
+	n, err := r.src.ReadAt(p, r.off)
+	r.off += int64(n)
+	return n, err
+}
+
+func (r *shardReader) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = r.off + offset
+	case io.SeekEnd:
+		abs = r.size + offset
+	default:
+		return 0, errBadWhence
+	}
+	if abs < 0 {
+		return 0, errNegativeOffset
+	}
+	r.off = abs
+	return abs, nil
+}
+
 // scanShard parses one shard with one parser.
-func scanShard(ctx context.Context, p *Parser, s shard, worker int,
+func scanShard(ctx context.Context, p *Parser, rd *shardReader, s shard, worker int,
 	fn func(worker int, r *Record) error,
 ) error {
-	// A section over the whole source, so Record.Offset stays a position in
-	// the FILE and the parser can resynchronise using bytes before the
-	// shard's start.
-	p.Reset(io.NewSectionReader(s.src, 0, s.size))
+	// The reader spans the whole source, not just the shard, so Record.Offset
+	// stays a position in the FILE and the parser can resynchronise using
+	// bytes before the shard's start.
+	rd.reset(s.src, s.size)
+	p.Reset(rd)
 
 	// Resolve the format -- and, for stderr, log_line_prefix -- from the
 	// HEAD of the source, before seeking into the shard.
@@ -167,18 +255,44 @@ func scanShard(ctx context.Context, p *Parser, s shard, worker int,
 
 // minShardBytes is the smallest slice worth giving a worker.
 //
-// Below this, the per-shard cost -- opening a section reader, resolving the
-// format, resynchronising to a record boundary -- outweighs the parsing saved,
-// and splitting a small file many ways mostly produces empty shards. A file
-// under this size goes to one worker whole.
+// Below this, the per-shard cost -- re-pointing the reader, resynchronising to
+// a record boundary -- outweighs the parsing saved, and splitting a small file
+// many ways mostly produces empty shards. A file under this size goes to one
+// worker whole.
 const minShardBytes = 64 << 10
 
+// targetShardBytes is how much input one shard aims to cover.
+//
+// It is a property of the INPUT, not of the worker count, and that is the
+// whole point. planShards used to clamp the parts per source to the number of
+// workers, so the same eight 4 MiB files became 8 shards for --jobs 1 and 64
+// for --jobs 8: the parallel side paid eight times the per-shard prologue, and
+// the ratio between the two was not a measure of parallelism at all. The two
+// must divide the corpus identically and differ only in how many goroutines
+// consume it (AC-019, issue #3).
+//
+// The size is set by the tail rather than by the prologue. wg.Wait means wall
+// time is the slowest worker, so one shard is the smallest imbalance the plan
+// can have: at 256 KiB an 8-worker run of the AC-019 corpus gets sixteen
+// shards apiece and a tail under a tenth of the work. A megabyte would be a
+// quarter of it.
+const targetShardBytes = 256 << 10
+
+// maxShardsPerSource bounds the plan for a very large source. At 256 KiB a
+// 10 GB file would otherwise plan forty thousand shards, and the plan is
+// itself memory that PERF-026 counts.
+const maxShardsPerSource = 8192
+
 // planShards divides the sources into work.
+//
+// It deliberately takes no worker count: two calls over the same sources must
+// produce the same plan whatever --jobs says, or the sides of the AC-019 ratio
+// are not doing equal work.
 //
 // A source whose size cannot be determined is not split: without a length
 // there is nowhere to cut, and reading it whole in one worker is correct if
 // not parallel. That is why it is a fallback rather than an error.
-func planShards(srcs []io.ReaderAt, workers int) []shard {
+func planShards(srcs []io.ReaderAt) []shard {
 	var shards []shard
 	for _, src := range srcs {
 		size, ok := sizeOf(src)
@@ -192,8 +306,13 @@ func planShards(srcs []io.ReaderAt, workers int) []shard {
 		// Split the source into byte ranges. Each range is snapped to a
 		// record boundary by the worker that reads it, so the cut
 		// points here can be arbitrary.
-		parts := int(size / minShardBytes)
-		parts = min(max(parts, 1), workers)
+		//
+		// Round up, so that the last shard is the short one rather than
+		// every shard being oversized; then refuse to cut below
+		// minShardBytes, which is what keeps a small file whole.
+		parts := int((size + targetShardBytes - 1) / targetShardBytes)
+		parts = min(parts, int(size/minShardBytes), maxShardsPerSource)
+		parts = max(parts, 1)
 
 		per := size / int64(parts)
 		for i := range parts {

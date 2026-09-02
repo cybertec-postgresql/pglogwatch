@@ -127,7 +127,7 @@ func (c *Config) normalize() {
 // A missing tool is not an error. The comparison still runs and the table says
 // which cells could not be measured, which is more useful than refusing to
 // produce anything -- and it is what makes the harness usable on a developer's
-// machine as well as on the pinned runner.
+// machine as well as in the benchmark container.
 func Detect() []Tool {
 	out := make([]Tool, 0, len(Tools))
 	for _, name := range Tools {
