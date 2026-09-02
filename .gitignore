@@ -39,3 +39,10 @@ coverage.out
 # copy committed per run would accumulate numbers nobody re-reads, and a stale
 # one is worse than none.
 /bench/RESULTS.md
+
+# What bench/scaling-baseline.sh writes: profiles, a test binary and a log,
+# dropped in the working directory so a run on the benchmark machine needs no
+# argument. Same reasoning as bench/RESULTS.md -- the numbers belong in
+# bench/THRESHOLDS.md once read, not in the history once per run.
+/scaling-out/
+scaling-baseline.log
