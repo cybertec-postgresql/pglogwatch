@@ -47,7 +47,7 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 
 **Purpose**: The scanner every rule is built on.
 
-- [ ] T003 Implement in `template.go` a byte-level tokenizer over `Record.Message` with no `regexp` and no allocation (CON-001, PERF-004): word characters are ASCII letters, digits, `_` and bytes above `0x7F`; it recognises single-quoted literals (`'…'`, `E'…'`, `U&'…'`, doubled quotes, backslash escapes in `E''`), dollar-quoted literals (`$tag$…$tag$`), double-quoted tokens, and numbers. Add a placeholder writer that emits `$1`, `$2`, … numbered left to right over the whole template (REQ-008), with unit tests in `template_test.go`
+- [x] T003 Implement in `template.go` a byte-level tokenizer over `Record.Message` with no `regexp` and no allocation (CON-001, PERF-004): word characters are ASCII letters, digits, `_` and bytes above `0x7F`; it recognises single-quoted literals (`'…'`, `E'…'`, `U&'…'`, doubled quotes, backslash escapes in `E''`), dollar-quoted literals (`$tag$…$tag$`), double-quoted tokens, and numbers. Add a placeholder writer that emits `$1`, `$2`, … numbered left to right over the whole template (REQ-008), with unit tests in `template_test.go`
 
 **Checkpoint**: tokenizer unit tests pass; the golden test still skips every masking row.
 

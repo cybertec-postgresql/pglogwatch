@@ -1,8 +1,10 @@
 package pglogwatch
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/cybertec-postgresql/pglogwatch/internal/allocs"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -168,4 +170,162 @@ func TestAppendTemplateGolden(t *testing.T) {
 			assert.Equal(t, prefix+c.want, string(got))
 		})
 	}
+}
+
+// tok is a token as the tests write it: its kind and its text.
+type tok struct {
+	kind tokKind
+	text string
+}
+
+// tokenize runs the tokenizer over s and returns every token.
+func tokenize(s string, stmt bool) []tok {
+	z := tokenizer{s: []byte(s), stmt: stmt}
+	var out []tok
+	for {
+		t, ok := z.next()
+		if !ok {
+			return out
+		}
+		out = append(out, tok{t.kind, s[t.start:t.end]})
+	}
+}
+
+// valueTokens keeps the tokens a masking rule may replace, which is what
+// most cases care about; spaces, words and punctuation are left out.
+func valueTokens(ts []tok) []tok {
+	var out []tok
+	for _, t := range ts {
+		switch t.kind {
+		case tokSpace, tokWord, tokPunct:
+		default:
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func TestTokenizerValues(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		stmt bool
+		want []tok
+	}{
+		{"integer", "wrote 123 buffers", false, []tok{{tokNumber, "123"}}},
+		{"number inside a word stays", "pg_stat_16 xid8 a1b2", false, nil},
+		{"decimal and scientific", "1.5 .25 1e10 2.5E-3", false,
+			[]tok{{tokNumber, "1.5"}, {tokNumber, ".25"}, {tokNumber, "1e10"}, {tokNumber, "2.5E-3"}}},
+		{"attached unit", "76kB 0.8% 5s", false,
+			[]tok{{tokNumber, "76kB"}, {tokNumber, "0.8%"}, {tokNumber, "5s"}}},
+		{"spaced unit", "duration: 12.345 ms  statement", false, []tok{{tokNumber, "12.345 ms"}}},
+		{"spaced unit before punctuation", "distance=16384 kB, write=0.004 s;", false,
+			[]tok{{tokNumber, "16384 kB"}, {tokNumber, "0.004 s"}}},
+		{"word after a number is not a unit", "123 buffers 1 msx", false,
+			[]tok{{tokNumber, "123"}, {tokNumber, "1"}}},
+		{"no spaced unit in statement mode", "SELECT 1 s", true, []tok{{tokNumber, "1"}}},
+		{"number followed by letters is a word", "1abc 12.5abc", false, nil},
+		{"sign after an operator", "x = -5 AND y=+2", true,
+			[]tok{{tokNumber, "-5"}, {tokNumber, "+2"}}},
+		{"minus after an operand is an operator", "a-1 a -1 (b)-2", true,
+			[]tok{{tokNumber, "1"}, {tokNumber, "1"}, {tokNumber, "2"}}},
+		{"version string", "16.4.1", false, []tok{{tokNumber, "16.4"}, {tokNumber, "1"}}},
+		{"hex", "0x1F 0Xff 0x1g", false, []tok{{tokHex, "0x1F"}, {tokHex, "0Xff"}}},
+		{"lsn", "lsn=0/3000060, redo lsn=A/16B3748.", false,
+			[]tok{{tokHex, "0/3000060"}, {tokHex, "A/16B3748"}}},
+		{"lsn-shaped path prefix is not an lsn", "0/16B3748/x", false, []tok{{tokNumber, "0"}}},
+		{"no lsn in statement mode", "c/2 1/2", true,
+			[]tok{{tokNumber, "2"}, {tokNumber, "1"}, {tokNumber, "2"}}},
+		{"single quotes", "name = 'x' AND s = 'it''s'", true,
+			[]tok{{tokString, "'x'"}, {tokString, "'it''s'"}}},
+		{"prefixed literals", `E'a\'b' U&'d\0061' B'101' X'1F' N'n'`, true,
+			[]tok{{tokString, `E'a\'b'`}, {tokString, `U&'d\0061'`}, {tokString, "B'101'"},
+				{tokString, "X'1F'"}, {tokString, "N'n'"}}},
+		{"backslash is literal without E", `'a\' b`, true, []tok{{tokString, `'a\'`}}},
+		{"apostrophe after a word is punctuation", "can't connect", false, nil},
+		{"unterminated literal runs to the end", "x = 'abc", true, []tok{{tokString, "'abc"}}},
+		{"dollar quotes", "$$a'b$$ $fn$ x $y$ $fn$ $q$open", true,
+			[]tok{{tokDollar, "$$a'b$$"}, {tokDollar, "$fn$ x $y$ $fn$"}, {tokDollar, "$q$open"}}},
+		{"placeholders", "id = $1 AND x=$12", true, []tok{{tokParam, "$1"}, {tokParam, "$12"}}},
+		{"dollar inside an identifier", "a$1 b$c", true, nil},
+		{"lone dollar", "costs $ x $a", true, nil},
+		{"double quotes", `relation "orders_2026" and "a""b" and U&"d"`, false,
+			[]tok{{tokIdent, `"orders_2026"`}, {tokIdent, `"a""b"`}, {tokIdent, `U&"d"`}}},
+		{"unterminated double quote", `x "abc`, false, []tok{{tokIdent, `"abc`}}},
+		{"high bytes are word bytes", "größe 5 Größe5", false, []tok{{tokNumber, "5"}}},
+		{"dotted words", "t.id postgresql.conf pgsql_tmp1234.0", false, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, valueTokens(tokenize(c.in, c.stmt)))
+		})
+	}
+}
+
+// TestTokenizerKeyValue pins what the key=value rule builds on: the key is a
+// word directly followed by '='.
+func TestTokenizerKeyValue(t *testing.T) {
+	got := tokenize("user=bob database=shop", false)
+	assert.Equal(t, []tok{
+		{tokWord, "user"}, {tokPunct, "="}, {tokWord, "bob"}, {tokSpace, " "},
+		{tokWord, "database"}, {tokPunct, "="}, {tokWord, "shop"},
+	}, got)
+}
+
+// TestTokenizerTiles checks that the tokens of every golden message, in both
+// modes, cover the input exactly once and in order, so a rule that copies
+// every token it does not mask reproduces the rest of the message.
+func TestTokenizerTiles(t *testing.T) {
+	inputs := []string{"", " ", "'", `"`, "$", "-", ".", "0x", "1e", "1e+", "E'\\", "U&", "$a"}
+	for _, c := range templateGolden {
+		inputs = append(inputs, c.message)
+	}
+	for _, in := range inputs {
+		for _, stmt := range []bool{false, true} {
+			var b strings.Builder
+			for _, tk := range tokenize(in, stmt) {
+				assert.NotEmpty(t, tk.text, "empty token in %q", in)
+				b.WriteString(tk.text)
+			}
+			assert.Equal(t, in, b.String(), "stmt=%v", stmt)
+		}
+	}
+}
+
+func TestPlaceholders(t *testing.T) {
+	var p placeholders
+	dst := []byte("keep:")
+	for range 12 {
+		dst = p.appendNext(dst)
+		dst = append(dst, ' ')
+	}
+	assert.Equal(t, "keep:$1 $2 $3 $4 $5 $6 $7 $8 $9 $10 $11 $12 ", string(dst))
+}
+
+// TestTokenizerNoAllocs guards CON-001 for the parts T003 adds: tokenizing a
+// message and writing placeholders into a buffer with room.
+func TestTokenizerNoAllocs(t *testing.T) {
+	msgs := make([][]byte, 0, len(templateGolden))
+	for _, c := range templateGolden {
+		msgs = append(msgs, []byte(c.message))
+	}
+	dst := make([]byte, 0, 4096)
+	allocs.Zero(t, 100, func() {
+		for _, m := range msgs {
+			var p placeholders
+			z := tokenizer{s: m}
+			dst = dst[:0]
+			for {
+				tk, ok := z.next()
+				if !ok {
+					break
+				}
+				if tk.kind != tokWord && tk.kind != tokSpace && tk.kind != tokPunct {
+					dst = p.appendNext(dst)
+				} else {
+					dst = append(dst, m[tk.start:tk.end]...)
+				}
+			}
+		}
+	})
 }
