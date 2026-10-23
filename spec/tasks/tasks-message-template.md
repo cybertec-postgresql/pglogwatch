@@ -37,7 +37,7 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 **Purpose**: The public API compiles and returns something, so every later task is a rule change plus a test.
 
 - [x] T001 Create `template.go` with `const TemplateRulesVersion = 1`, `func AppendTemplate(dst []byte, r *Record) []byte` (copies `r.Message` unchanged for now) and `func PatternID(r *Record, template []byte) [8]byte` (zero value for now), with doc comments that state the borrowed-slice contract and the "no allocation when `dst` has capacity" promise (REQ-013, CON-003)
-- [ ] T002 Create `template_test.go` with a table-driven golden test `TestAppendTemplateGolden` holding every row of spec section 4 (severity, SQLSTATE, message, template); rows not yet implemented are marked with the story that delivers them and skipped, so each later task turns rows on (AC-001)
+- [x] T002 Create `template_test.go` with a table-driven golden test `TestAppendTemplateGolden` holding every row of spec section 4 (severity, SQLSTATE, message, template); rows not yet implemented are marked with the story that delivers them and skipped, so each later task turns rows on (AC-001)
 
 **Checkpoint**: `go build ./...` and `go test ./...` pass; the API exists.
 
