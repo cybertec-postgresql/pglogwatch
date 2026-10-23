@@ -1,8 +1,8 @@
 ---
 title: pglogwatch — Standalone Zero-Allocation PostgreSQL Log Parser Module
-version: 1.0
+version: 1.1
 date_created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-10-23
 owner: pgwatch maintainers (CYBERTEC PostgreSQL International GmbH)
 tags: [tool, architecture, library, parser, performance, logs, golang]
 ---
@@ -289,8 +289,12 @@ single process, warm page cache, output discarded.
   `encoding/json`.
 - **CON-005**: The library MUST NOT read GUCs, connect to a server, or touch the filesystem
   outside of the explicitly requested reader constructors.
-- **CON-006**: Public API surface at v1.0 MUST be small enough to review: target ≤ 40 exported
-  identifiers in the root package.
+- **CON-006**: Public API surface MUST be small enough to review: target ≤ 40 exported
+  identifiers in the root package. Package-scope types, functions, variables and constants
+  count; methods and struct fields do not. An enumeration, meaning a named type together with
+  its typed constants (`Severity`, `Format`, `Flags`), counts as one identifier, because a
+  reader learns it as one decision. (Amended in 1.1: v1.0 counted each enumeration value on its
+  own and reached exactly 40, which left no room for the first post-v1.0 addition.)
 - **CON-007**: pgwatch's existing `server_log_event_counts` measurement schema (per-severity
   lowercase `<severity>` and `<severity>_total` int64 columns) MUST remain byte-identical after
   migration, so existing dashboards and sinks continue to work.
