@@ -141,6 +141,10 @@ helper treats bytes above `0x7F` as word characters.
   template returns it unchanged.
 - **CON-003**: The helper lives in the root package next to `Record` and adds no dependency;
   `crypto/sha256` is standard library.
+- **CON-004**: The three new exported names (`TemplateRulesVersion`, `AppendTemplate`,
+  `PatternID`) fit the API budget of CON-006 in the module specification, as amended in its
+  version 1.1 to count each enumeration once. The root package goes from 18 to 21 counted
+  identifiers out of 40. Adding them is a minor release (PKG-006).
 - **GUD-001**: When a rule is in doubt, mask. A template that is too coarse costs a little
   precision; a template that keeps a value leaks it.
 
