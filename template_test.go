@@ -24,6 +24,17 @@ func sqlState(t *testing.T, code string) [5]byte {
 	return s
 }
 
+// templateCase is one unit-test case of AppendTemplate for a record with no
+// SQLSTATE: in is the message and want the template.
+type templateCase struct {
+	name, in, want string
+}
+
+// templateStateCase is a templateCase whose record carries a SQLSTATE.
+type templateStateCase struct {
+	name, state, in, want string
+}
+
 // templateGolden holds every row of the table in section 4 of
 // spec/message-template.md (AC-001).
 //
@@ -167,35 +178,35 @@ func TestAppendTemplateGolden(t *testing.T) {
 	}
 }
 
+// templateLiteralCases holds the cases of TestAppendTemplateLiterals.
+var templateLiteralCases = []templateCase{
+	{"integer", "sorted 42 rows", "sorted $1 rows"},
+	{"number inside a word stays", "pg_stat_16 stays", "pg_stat_16 stays"},
+	{"digit at the end of a word stays", "type xid8 is wide", "type xid8 is wide"},
+	{"signed integer", "offset -5 is negative", "offset $1 is negative"},
+	{"scientific", "cost 1.5e3 and 2.5E-3", "cost $1 and $2"},
+	{"decimal without a leading digit", "ratio .25 used", "ratio $1 used"},
+	{"spaced unit", "took 12 ms to run", "took $1 to run"},
+	{"attached unit and percent", "used 76kB (0.8%)", "used $1 ($2)"},
+	{"hex", "flags 0x1F set", "flags $1 set"},
+	{"lsn", "redo starts at 0/16B3748", "redo starts at $1"},
+	{"single-quoted literal", "value 'secret' rejected", "value $1 rejected"},
+	{"doubled quote", "value 'it''s' rejected", "value $1 rejected"},
+	{"backslash escape", `value E'a\'b' rejected`, "value $1 rejected"},
+	{"unicode literal", `value U&'d\0061' rejected`, "value $1 rejected"},
+	{"dollar-quoted literal", "body $q$x$q$ rejected", "body $1 rejected"},
+	{"empty dollar tag", "body $$it's$$ rejected", "body $1 rejected"},
+	{"apostrophe in a word stays", "can't open 3 files", "can't open $1 files"},
+	{"numbering runs left to right", "1 and 'a' and 0x2 and $t$b$t$", "$1 and $2 and $3 and $4"},
+}
+
 // TestAppendTemplateLiterals checks the literal rules of T004 one by one:
 // standalone numbers with their units (REQ-001), hex and LSN tokens
 // (REQ-002), and single- and dollar-quoted literals (REQ-003). The messages
 // avoid key=value pairs, ids, paths and double quotes, whose rules come in
 // later tasks.
 func TestAppendTemplateLiterals(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"integer", "sorted 42 rows", "sorted $1 rows"},
-		{"number inside a word stays", "pg_stat_16 stays", "pg_stat_16 stays"},
-		{"digit at the end of a word stays", "type xid8 is wide", "type xid8 is wide"},
-		{"signed integer", "offset -5 is negative", "offset $1 is negative"},
-		{"scientific", "cost 1.5e3 and 2.5E-3", "cost $1 and $2"},
-		{"decimal without a leading digit", "ratio .25 used", "ratio $1 used"},
-		{"spaced unit", "took 12 ms to run", "took $1 to run"},
-		{"attached unit and percent", "used 76kB (0.8%)", "used $1 ($2)"},
-		{"hex", "flags 0x1F set", "flags $1 set"},
-		{"lsn", "redo starts at 0/16B3748", "redo starts at $1"},
-		{"single-quoted literal", "value 'secret' rejected", "value $1 rejected"},
-		{"doubled quote", "value 'it''s' rejected", "value $1 rejected"},
-		{"backslash escape", `value E'a\'b' rejected`, "value $1 rejected"},
-		{"unicode literal", `value U&'d\0061' rejected`, "value $1 rejected"},
-		{"dollar-quoted literal", "body $q$x$q$ rejected", "body $1 rejected"},
-		{"empty dollar tag", "body $$it's$$ rejected", "body $1 rejected"},
-		{"apostrophe in a word stays", "can't open 3 files", "can't open $1 files"},
-		{"numbering runs left to right", "1 and 'a' and 0x2 and $t$b$t$", "$1 and $2 and $3 and $4"},
-	}
-	for _, c := range cases {
+	for _, c := range templateLiteralCases {
 		t.Run(c.name, func(t *testing.T) {
 			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
 			assert.Equal(t, "keep:"+c.want, string(got))
@@ -203,59 +214,59 @@ func TestAppendTemplateLiterals(t *testing.T) {
 	}
 }
 
+// templateKeyValueCases holds the cases of TestAppendTemplateKeyValue.
+var templateKeyValueCases = []templateCase{
+	{"word value", "user=bob database=shop", "user=$1 database=$2"},
+	{"value with punctuation and digits", "user=SECRET-2 database=x", "user=$1 database=$2"},
+	{"empty value at the end", "user=bob application_name=", "user=$1 application_name=$2"},
+	{"empty value before the next key", "application_name= user=bob", "application_name=$1 user=$2"},
+	{"value ends at a comma", "protocol=TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, bits=256)",
+		"protocol=$1, cipher=$2, bits=$3)"},
+	{"value ends at a semicolon", "total=12.401 s; sync files=7", "total=$1; sync files=$2"},
+	{"number with a spaced unit is one value", "write=12.345 s, distance=16384 kB", "write=$1, distance=$2"},
+	{"lsn value", "lsn=0/3000060, redo lsn=0/3000028", "lsn=$1, redo lsn=$2"},
+	{"single-quoted value with a space", "options='-c x=1' user=a", "options=$1 user=$2"},
+	{"double-quoted value with a space", `name="a b" user=a`, "name=$1 user=$2"},
+	{"host and port", "host=[local] port=5432", "host=$1 port=$2"},
+	{"ipv6 host", "host=::1 port=5432", "host=$1 port=$2"},
+	{"value inside parentheses", "(user=bob)", "(user=$1)"},
+	{"spaced equals is not a pair", "x = bob", "x = bob"},
+	{"numbering continues after a pair", "wrote 3 user=bob 4", "wrote $1 user=$2 $3"},
+}
+
 // TestAppendTemplateKeyValue checks REQ-004: every key stays and every value,
 // whatever its tokens, becomes one placeholder.
 func TestAppendTemplateKeyValue(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"word value", "user=bob database=shop", "user=$1 database=$2"},
-		{"value with punctuation and digits", "user=SECRET-2 database=x", "user=$1 database=$2"},
-		{"empty value at the end", "user=bob application_name=", "user=$1 application_name=$2"},
-		{"empty value before the next key", "application_name= user=bob", "application_name=$1 user=$2"},
-		{"value ends at a comma", "protocol=TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, bits=256)",
-			"protocol=$1, cipher=$2, bits=$3)"},
-		{"value ends at a semicolon", "total=12.401 s; sync files=7", "total=$1; sync files=$2"},
-		{"number with a spaced unit is one value", "write=12.345 s, distance=16384 kB", "write=$1, distance=$2"},
-		{"lsn value", "lsn=0/3000060, redo lsn=0/3000028", "lsn=$1, redo lsn=$2"},
-		{"single-quoted value with a space", "options='-c x=1' user=a", "options=$1 user=$2"},
-		{"double-quoted value with a space", `name="a b" user=a`, "name=$1 user=$2"},
-		{"host and port", "host=[local] port=5432", "host=$1 port=$2"},
-		{"ipv6 host", "host=::1 port=5432", "host=$1 port=$2"},
-		{"value inside parentheses", "(user=bob)", "(user=$1)"},
-		{"spaced equals is not a pair", "x = bob", "x = bob"},
-		{"numbering continues after a pair", "wrote 3 user=bob 4", "wrote $1 user=$2 $3"},
-	}
-	for _, c := range cases {
+	for _, c := range templateKeyValueCases {
 		t.Run(c.name, func(t *testing.T) {
 			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
 			assert.Equal(t, "keep:"+c.want, string(got))
 		})
 	}
+}
+
+// templateIDCases holds the cases of TestAppendTemplateIDs.
+var templateIDCases = []templateCase{
+	{"lock wait", "process 1234 waits for ShareLock on transaction 7890; blocked by process 4321",
+		"process $1 waits for ShareLock on transaction $2; blocked by process $3"},
+	{"virtual transaction", "process 12 waits for ExclusiveLock on virtual transaction 3/1234",
+		"process $1 waits for ExclusiveLock on virtual transaction $2"},
+	{"session id", "session 5f3c1a2b.4d2 ended", "session $1 ended"},
+	{"PID in upper case", "terminating PID 1234", "terminating PID $1"},
+	{"relation oid", "could not open relation 16384", "could not open relation $1"},
+	{"with OID", "cache lookup failed for relation with OID 16384", "cache lookup failed for relation with OID $1"},
+	{"database oid", "database 16384 must be vacuumed", "database $1 must be vacuumed"},
+	{"backend", "backend 5f3c1a2b crashed", "backend $1 crashed"},
+	{"hex word without a leading digit", "session ab12cd.4 ended", "session $1 ended"},
+	{"quoted identifier stays", `relation "orders" does not exist`, `relation "orders" does not exist`},
+	{"plain word stays", "database system is ready", "database system is ready"},
 }
 
 // TestAppendTemplateIDs checks REQ-006: the id after a process, transaction,
 // relation, OID or session word becomes a placeholder, also when it is not a
 // plain number. A quoted identifier or a plain word after such a word stays.
 func TestAppendTemplateIDs(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"lock wait", "process 1234 waits for ShareLock on transaction 7890; blocked by process 4321",
-			"process $1 waits for ShareLock on transaction $2; blocked by process $3"},
-		{"virtual transaction", "process 12 waits for ExclusiveLock on virtual transaction 3/1234",
-			"process $1 waits for ExclusiveLock on virtual transaction $2"},
-		{"session id", "session 5f3c1a2b.4d2 ended", "session $1 ended"},
-		{"PID in upper case", "terminating PID 1234", "terminating PID $1"},
-		{"relation oid", "could not open relation 16384", "could not open relation $1"},
-		{"with OID", "cache lookup failed for relation with OID 16384", "cache lookup failed for relation with OID $1"},
-		{"database oid", "database 16384 must be vacuumed", "database $1 must be vacuumed"},
-		{"backend", "backend 5f3c1a2b crashed", "backend $1 crashed"},
-		{"hex word without a leading digit", "session ab12cd.4 ended", "session $1 ended"},
-		{"quoted identifier stays", `relation "orders" does not exist`, `relation "orders" does not exist`},
-		{"plain word stays", "database system is ready", "database system is ready"},
-	}
-	for _, c := range cases {
+	for _, c := range templateIDCases {
 		t.Run(c.name, func(t *testing.T) {
 			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
 			assert.Equal(t, "keep:"+c.want, string(got))
@@ -263,32 +274,32 @@ func TestAppendTemplateIDs(t *testing.T) {
 	}
 }
 
+// templateQuotedCases holds the cases of TestAppendTemplateQuoted.
+var templateQuotedCases = []templateStateCase{
+	{"identifier stays", "42P01", `relation "orders_2026" does not exist`, `relation "orders_2026" does not exist`},
+	{"identifier stays without a SQLSTATE", "", `relation "orders" is locked`, `relation "orders" is locked`},
+	{"class 22 masks every quoted token", "22023", `invalid value "SECRET-3" for "x"`, `invalid value $1 for $2`},
+	{"class 23 masks the constraint", "23503", `insert on table "a" violates foreign key constraint "a_b_fkey"`,
+		`insert on table $1 violates foreign key constraint $2`},
+	{"class 42 is not a data class", "42703", `column "SECRET" does not exist`, `column "SECRET" does not exist`},
+	{"input syntax for type in another class", "XX000", `invalid input syntax for type integer: "abc"`,
+		`invalid input syntax for type integer: $1`},
+	{"input syntax for without type", "XX000", `invalid input syntax for integer: "abc"`,
+		`invalid input syntax for integer: $1`},
+	{"quoted type name", "XX000", `invalid input syntax for type "MyType": "abc"`,
+		`invalid input syntax for type "MyType": $1`},
+	{"enum value", "XX000", `invalid input value for enum mood: "x"`, `invalid input value for enum mood: $1`},
+	{"for without a colon keeps the role", "28P01", `password authentication failed for user "bob"`,
+		`password authentication failed for user "bob"`},
+	{"punctuation drops the for phrase", "28000", `no entry for host "h", user "bob": x "y"`,
+		`no entry for host "h", user "bob": x "y"`},
+}
+
 // TestAppendTemplateQuoted checks REQ-005: a double-quoted token is an
 // identifier and stays, except under SQLSTATE class 22 or 23, and after a
 // "for <words>:" phrase in any class.
 func TestAppendTemplateQuoted(t *testing.T) {
-	cases := []struct {
-		name, state, in, want string
-	}{
-		{"identifier stays", "42P01", `relation "orders_2026" does not exist`, `relation "orders_2026" does not exist`},
-		{"identifier stays without a SQLSTATE", "", `relation "orders" is locked`, `relation "orders" is locked`},
-		{"class 22 masks every quoted token", "22023", `invalid value "SECRET-3" for "x"`, `invalid value $1 for $2`},
-		{"class 23 masks the constraint", "23503", `insert on table "a" violates foreign key constraint "a_b_fkey"`,
-			`insert on table $1 violates foreign key constraint $2`},
-		{"class 42 is not a data class", "42703", `column "SECRET" does not exist`, `column "SECRET" does not exist`},
-		{"input syntax for type in another class", "XX000", `invalid input syntax for type integer: "abc"`,
-			`invalid input syntax for type integer: $1`},
-		{"input syntax for without type", "XX000", `invalid input syntax for integer: "abc"`,
-			`invalid input syntax for integer: $1`},
-		{"quoted type name", "XX000", `invalid input syntax for type "MyType": "abc"`,
-			`invalid input syntax for type "MyType": $1`},
-		{"enum value", "XX000", `invalid input value for enum mood: "x"`, `invalid input value for enum mood: $1`},
-		{"for without a colon keeps the role", "28P01", `password authentication failed for user "bob"`,
-			`password authentication failed for user "bob"`},
-		{"punctuation drops the for phrase", "28000", `no entry for host "h", user "bob": x "y"`,
-			`no entry for host "h", user "bob": x "y"`},
-	}
-	for _, c := range cases {
+	for _, c := range templateQuotedCases {
 		t.Run(c.name, func(t *testing.T) {
 			r := &Record{SQLState: sqlState(t, c.state), Message: []byte(c.in)}
 			got := AppendTemplate([]byte("keep:"), r)
@@ -297,37 +308,37 @@ func TestAppendTemplateQuoted(t *testing.T) {
 	}
 }
 
+// templatePathCases holds the cases of TestAppendTemplatePaths.
+var templatePathCases = []templateCase{
+	{"quoted base path", `temporary file: path "base/pgsql_tmp/pgsql_tmp1234.0", size 1048576`,
+		`temporary file: path $1, size $2`},
+	{"quoted pg_wal path", `could not open file "pg_wal/000000010000000000000001": No such file or directory`,
+		`could not open file $1: No such file or directory`},
+	{"quoted absolute path", `could not open file "/var/lib/postgresql/16/main/postgresql.conf": Permission denied`,
+		`could not open file $1: Permission denied`},
+	{"quoted tablespace path", `could not stat "pg_tblspc/16385/PG_16_202307071/16384"`, `could not stat $1`},
+	{"quoted global path", `could not read "global/pg_control"`, `could not read $1`},
+	{"quoted relative path", `loaded "./conf.d/a.conf"`, `loaded $1`},
+	{"windows path with backslashes", `could not open file "C:\Program Files\PostgreSQL\16\data\pg_hba.conf"`,
+		`could not open file $1`},
+	{"windows path with slashes", `could not open "c:/pgdata/base/1/2"`, `could not open $1`},
+	{"bare absolute path", "listening on Unix socket /var/run/postgresql/.s.PGSQL.5432", "listening on Unix socket $1"},
+	{"bare path before a colon", "could not open /tmp/x.log: denied", "could not open $1: denied"},
+	{"bare path ends a sentence", "archived to /archive/0001.", "archived to $1."},
+	{"bare path in parentheses", "data directory (/srv/pg) is fine", "data directory ($1) is fine"},
+	{"bare windows path", `writing C:\pg\log\a.log now`, "writing $1 now"},
+	{"bare pg_ path", "removing pg_wal/000000010000000000000002", "removing $1"},
+	{"spaced division stays", "operator does not exist: integer / text", "operator does not exist: integer / text"},
+	{"division between words stays", "t/s and (x)/y", "t/s and (x)/y"},
+	{"lsn stays an lsn", "redo at 0/16B3748 done", "redo at $1 done"},
+	{"pg_ word without a slash stays", "pg_stat_statements must be loaded", "pg_stat_statements must be loaded"},
+	{"quoted identifier with a slash stays", `relation "a/b" is odd`, `relation "a/b" is odd`},
+}
+
 // TestAppendTemplatePaths checks REQ-007: a file path, bare or inside double
 // quotes, becomes one placeholder, while a division or an LSN does not.
 func TestAppendTemplatePaths(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-	}{
-		{"quoted base path", `temporary file: path "base/pgsql_tmp/pgsql_tmp1234.0", size 1048576`,
-			`temporary file: path $1, size $2`},
-		{"quoted pg_wal path", `could not open file "pg_wal/000000010000000000000001": No such file or directory`,
-			`could not open file $1: No such file or directory`},
-		{"quoted absolute path", `could not open file "/var/lib/postgresql/16/main/postgresql.conf": Permission denied`,
-			`could not open file $1: Permission denied`},
-		{"quoted tablespace path", `could not stat "pg_tblspc/16385/PG_16_202307071/16384"`, `could not stat $1`},
-		{"quoted global path", `could not read "global/pg_control"`, `could not read $1`},
-		{"quoted relative path", `loaded "./conf.d/a.conf"`, `loaded $1`},
-		{"windows path with backslashes", `could not open file "C:\Program Files\PostgreSQL\16\data\pg_hba.conf"`,
-			`could not open file $1`},
-		{"windows path with slashes", `could not open "c:/pgdata/base/1/2"`, `could not open $1`},
-		{"bare absolute path", "listening on Unix socket /var/run/postgresql/.s.PGSQL.5432", "listening on Unix socket $1"},
-		{"bare path before a colon", "could not open /tmp/x.log: denied", "could not open $1: denied"},
-		{"bare path ends a sentence", "archived to /archive/0001.", "archived to $1."},
-		{"bare path in parentheses", "data directory (/srv/pg) is fine", "data directory ($1) is fine"},
-		{"bare windows path", `writing C:\pg\log\a.log now`, "writing $1 now"},
-		{"bare pg_ path", "removing pg_wal/000000010000000000000002", "removing $1"},
-		{"spaced division stays", "operator does not exist: integer / text", "operator does not exist: integer / text"},
-		{"division between words stays", "t/s and (x)/y", "t/s and (x)/y"},
-		{"lsn stays an lsn", "redo at 0/16B3748 done", "redo at $1 done"},
-		{"pg_ word without a slash stays", "pg_stat_statements must be loaded", "pg_stat_statements must be loaded"},
-		{"quoted identifier with a slash stays", `relation "a/b" is odd`, `relation "a/b" is odd`},
-	}
-	for _, c := range cases {
+	for _, c := range templatePathCases {
 		t.Run(c.name, func(t *testing.T) {
 			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
 			assert.Equal(t, "keep:"+c.want, string(got))
@@ -441,7 +452,7 @@ func TestTokenizerKeyValue(t *testing.T) {
 // modes, cover the input exactly once and in order, so a rule that copies
 // every token it does not mask reproduces the rest of the message.
 func TestTokenizerTiles(t *testing.T) {
-	inputs := []string{"", " ", "'", `"`, "$", "-", ".", "0x", "1e", "1e+", "E'\\", "U&", "$a"}
+	inputs := []string{"", " ", "'", `"`, "$", "-", ".", "0x", "1e", "1e+", "E'\\", "U&", "$a", "..0", "-..5"}
 	for _, c := range templateGolden {
 		inputs = append(inputs, c.message)
 	}
@@ -493,4 +504,75 @@ func TestTokenizerNoAllocs(t *testing.T) {
 			}
 		}
 	})
+}
+
+// templateIdempotentCases are templates, and messages whose first template
+// once read back differently, for TestAppendTemplateIdempotent (CON-002).
+// When in is a template, want equals in unless its placeholder numbers are
+// out of order.
+var templateIdempotentCases = []templateStateCase{
+	{"id word before a placeholder", "", "process $1 waits on transaction $2", "process $1 waits on transaction $2"},
+	{"key with a placeholder value", "", "user=$1 database=$2", "user=$1 database=$2"},
+	{"placeholder before a colon and a path", "", "could not open $1: denied, see /tmp/x", "could not open $1: denied, see $2"},
+	{"placeholder before a unit word", "", "took $1 s and $2 ms", "took $1 s and $2 ms"},
+	{"placeholder with two digits", "", "a $1 b $2 c $3 d $4 e $5 f $6 g $7 h $8 i $9 j $10 k $11",
+		"a $1 b $2 c $3 d $4 e $5 f $6 g $7 h $8 i $9 j $10 k $11"},
+	{"placeholder before a digit word", "", "wrote $1 0abc", "wrote $1 0abc"},
+	{"placeholders are renumbered", "", "from $7 to $3", "from $1 to $2"},
+	{"placeholder in class 23", "23505", "violates unique constraint $1", "violates unique constraint $1"},
+	{"placeholder after a for phrase", "22P02", "invalid input syntax for type integer: $1", "invalid input syntax for type integer: $1"},
+	{"placeholder in parentheses", "", "wrote $1 buffers ($2); lsn=$3", "wrote $1 buffers ($2); lsn=$3"},
+	{"signed placeholder", "", "offset -$1 and +$2", "offset -$1 and +$2"},
+	{"quoted data right after a word takes the word", "22023", `abc"x" 5`, "$1 $2"},
+	{"literal right after a dollar takes the dollar", "", "$'a' 5", "$1 $2"},
+	{"digit word right after a literal joins it", "", "'a'1abc 5", "$1 $2"},
+	{"quoted data takes a dollar and a word before it", "22023", `$A00"x" 5`, "$1 $2"},
+}
+
+// templateInputs collects every message the template tests use, with its
+// SQLSTATE: the golden rows that run and the cases of each unit test. A new
+// case added to one of those tables is covered by TestAppendTemplateIdempotent
+// without further work.
+func templateInputs() []templateStateCase {
+	var out []templateStateCase
+	for _, c := range templateGolden {
+		if c.pending == "" {
+			out = append(out, templateStateCase{"golden/" + c.name, c.sqlState, c.message, c.want})
+		}
+	}
+	for _, set := range []struct {
+		name  string
+		cases []templateCase
+	}{
+		{"literal", templateLiteralCases},
+		{"key-value", templateKeyValueCases},
+		{"id", templateIDCases},
+		{"path", templatePathCases},
+	} {
+		for _, c := range set.cases {
+			out = append(out, templateStateCase{set.name + "/" + c.name, "", c.in, c.want})
+		}
+	}
+	for _, c := range templateQuotedCases {
+		out = append(out, templateStateCase{"quoted/" + c.name, c.state, c.in, c.want})
+	}
+	for _, c := range templateIdempotentCases {
+		out = append(out, templateStateCase{"idempotent/" + c.name, c.state, c.in, c.want})
+	}
+	return out
+}
+
+// TestAppendTemplateIdempotent checks CON-002 and AC-005: masking a template
+// again, under the same severity and SQLSTATE, returns it unchanged. It runs
+// over the template of every input in templateInputs.
+func TestAppendTemplateIdempotent(t *testing.T) {
+	for _, c := range templateInputs() {
+		t.Run(c.name, func(t *testing.T) {
+			state := sqlState(t, c.state)
+			first := AppendTemplate(nil, &Record{SQLState: state, Message: []byte(c.in)})
+			assert.Equal(t, c.want, string(first))
+			second := AppendTemplate(nil, &Record{SQLState: state, Message: first})
+			assert.Equal(t, string(first), string(second))
+		})
+	}
 }

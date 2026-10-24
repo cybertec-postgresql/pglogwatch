@@ -37,10 +37,27 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	prev := tokSpace // kind of the token before t
 	idNext := false  // the last word, before white space, is followed by an id
 	var after forState
+	// fuse is the start in dst of the run of copied words and '$' bytes that
+	// dst ends with, and -1 when it ends with anything else. A placeholder
+	// written right after that run would read back as part of a word ("a$1")
+	// or as a dollar quote ("$$1"), so the placeholder replaces the run
+	// (GUD-001).
+	fuse := -1
+	// glued is true while dst ends with a placeholder. A copied word that
+	// starts with a digit would extend its number ("$1" and "0abc" read back
+	// as "$10" and "abc"), so the placeholder takes that word too.
+	glued := false
+	mask := func() {
+		if fuse >= 0 {
+			dst = dst[:fuse]
+		}
+		dst = p.appendNext(dst)
+		fuse, glued = -1, true
+	}
 	for {
 		if end, ok := z.pathAt(z.pos); ok {
 			// REQ-007: a bare path is a value up to where pathLen ends it.
-			dst = p.appendNext(dst)
+			mask()
 			z.pos = end
 			prev, idNext, after = tokParam, false, forNone
 			continue
@@ -49,37 +66,47 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		if !ok {
 			return dst
 		}
+		tb := msg[t.start:t.end]
 		switch {
-		case t.kind == tokPunct && msg[t.start] == '=' && prev == tokWord:
+		case t.kind == tokPunct && tb[0] == '=' && prev == tokWord:
 			// REQ-004: the word before '=' is a key and stays; everything up
 			// to the end of the value becomes one placeholder. An empty value
 			// gets one too, so "application_name=" and "application_name=psql"
 			// give the same template.
-			dst = p.appendNext(append(dst, '='))
+			dst, fuse = append(dst, '='), -1
+			mask()
 			z.skipValue()
 			prev, idNext, after = tokParam, false, forNone
 			continue
-		case masksLiteral(t.kind), t.kind == tokWord && idNext && hasDigit(msg[t.start:t.end]):
+		case masksLiteral(t.kind), t.kind == tokWord && idNext && hasDigit(tb):
 			// REQ-006: a word with a digit after an id word, such as the
 			// session id in "session 5f3c1a2b.4d2", is an id. Numeric ids
 			// and the LSN-shaped virtual transaction id "3/1234" are already
 			// literals.
-			dst = p.appendNext(dst)
-		case t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(msg[t.start:t.end])):
+			mask()
+		case t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(tb)):
 			// REQ-005 and REQ-007: a double-quoted token is an identifier
 			// and stays, unless it holds data or a path.
-			dst = p.appendNext(dst)
+			mask()
+		case glued && t.kind == tokWord && isDigit(tb[0]):
+			// The placeholder before this word takes it; see glued.
 		default:
-			dst = append(dst, msg[t.start:t.end]...)
+			if t.kind != tokWord && (t.kind != tokPunct || tb[0] != '$') {
+				fuse = -1
+			} else if fuse < 0 {
+				fuse = len(dst)
+			}
+			dst = append(dst, tb...)
+			glued = false
 		}
 		switch t.kind {
 		case tokSpace:
 		case tokWord:
-			idNext = isIDWord(msg[t.start:t.end])
+			idNext = isIDWord(tb)
 		default:
 			idNext = false
 		}
-		after = after.next(t.kind, msg[t.start:t.end])
+		after = after.next(t.kind, tb)
 		prev = t.kind
 	}
 }
@@ -283,10 +310,12 @@ func hasDigit(b []byte) bool {
 // masksLiteral reports whether a token of kind k is a literal value that
 // always becomes a placeholder: a standalone number with its unit (REQ-001),
 // a hex or LSN token (REQ-002), or a single- or dollar-quoted literal
-// (REQ-003). A number inside a word is a tokWord and is not masked.
+// (REQ-003). An existing $n placeholder is written afresh, which renumbers
+// it and makes masking idempotent (CON-002). A number inside a word is a
+// tokWord and is not masked.
 func masksLiteral(k tokKind) bool {
 	switch k {
-	case tokNumber, tokHex, tokString, tokDollar:
+	case tokNumber, tokHex, tokString, tokDollar, tokParam:
 		return true
 	}
 	return false
@@ -406,7 +435,7 @@ func (z *tokenizer) next() (token, bool) {
 	case c == '$':
 		kind, end = z.scanDollar(start)
 	case isDigit(c),
-		c == '.' && z.numberAt(start+1) && (start == 0 || !isWordByte(s[start-1])),
+		c == '.' && start+1 < len(s) && isDigit(s[start+1]) && (start == 0 || !isWordByte(s[start-1])),
 		(c == '+' || c == '-') && z.numberAt(start+1) && z.signAllowed(start):
 		kind, end = z.scanNumeric(start)
 	case isWordByte(c):
