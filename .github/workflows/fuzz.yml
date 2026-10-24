@@ -26,7 +26,7 @@ jobs:
       # the first.
       fail-fast: false
       matrix:
-        target: [FuzzParseRecord, FuzzPrefixTemplate, FuzzUnquote]
+        target: [FuzzParseRecord, FuzzPrefixTemplate, FuzzUnquote, FuzzAppendTemplate]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
