@@ -1,3 +1,36 @@
+# pglogwatch v1.1.0 (unreleased)
+
+A minor release under PKG-006: it adds three exported identifiers and
+changes none.
+
+## What is new
+
+- **Message templates.** `AppendTemplate` appends a record's message with
+  every value replaced by `$1`, `$2` and so on: numbers, quoted literals,
+  `key=value` values, process and transaction ids, file paths, and the
+  literals of a logged statement. Words, identifiers and the shape of the
+  statement stay, so records that differ only by values share a template.
+  `PatternID` hashes severity, SQLSTATE, `TemplateRulesVersion` and the
+  template into an 8-byte id that can be a map key. Neither allocates when
+  `dst` has 1,100 bytes of spare capacity. `spec/message-template.md` is the
+  specification.
+- **Masking errs toward privacy.** When a rule is in doubt, the helper masks
+  (GUD-001). A privacy corpus of 333 messages seeded with marker values runs
+  on every build, and no marker may survive. A fuzz target,
+  `FuzzAppendTemplate`, joins the nightly fuzz job.
+- **`TemplateRulesVersion`** is part of the hash. A later rule change raises
+  it, so stored ids from an older rule set do not mix with new ones.
+
+## The API budget counts each enumeration once
+
+The v1.0.0 freeze counted every `Severity`, `Format` and `Flags` value as its
+own identifier and reached exactly 40 of 40, which left no room for any
+addition. CON-006 now counts a named type and its typed constants as one
+identifier, since a reader learns them as one decision. The cap stays at 40.
+The root package used 18 before this release and uses 21 with it.
+
+---
+
 # pglogwatch v1.0.0
 
 A zero-allocation PostgreSQL log parser for Go, extracted from pgwatch and
