@@ -100,3 +100,43 @@ func ExampleParallelScan() {
 	fmt.Println(severities)
 	// Output: [ERROR ERROR LOG LOG WARNING WARNING]
 }
+
+// AppendTemplate masks the values in a message, so records that differ only
+// by values share a template. PatternID turns severity, SQLSTATE and
+// template into a fixed-size key for counting. The template reads the
+// message as given, so unquote a csvlog or jsonlog message first, or the
+// same event gives one template per format. With buffers reused across
+// records, the loop allocates only when it keeps a new template.
+func ExampleAppendTemplate() {
+	const log = `{"timestamp":"2026-08-30 10:11:12.123 UTC","error_severity":"LOG","message":"duration: 1.500 ms  statement: SELECT * FROM t WHERE id = 42"}
+{"timestamp":"2026-08-30 10:11:13.001 UTC","error_severity":"LOG","message":"duration: 0.731 ms  statement: SELECT * FROM t WHERE id = 43"}
+{"timestamp":"2026-08-30 10:11:14.500 UTC","error_severity":"ERROR","state_code":"22P02","message":"invalid input syntax for type integer: \"abc\""}
+`
+	p := pglogwatch.New(strings.NewReader(log), pglogwatch.Config{})
+
+	counts := map[[8]byte]int{}
+	templates := map[[8]byte]string{}
+	var order [][8]byte
+	var msg []byte
+	tmpl := make([]byte, 0, 1100) // AppendTemplate never grows this
+	for p.Next() {
+		r := *p.Record()
+		if r.Flags&pglogwatch.FlagNeedsUnquote != 0 {
+			msg = pglogwatch.AppendUnquoted(msg[:0], r.Message, p.DetectedFormat())
+			r.Message = msg
+		}
+		tmpl = pglogwatch.AppendTemplate(tmpl[:0], &r)
+		id := pglogwatch.PatternID(&r, tmpl)
+		if counts[id] == 0 {
+			templates[id] = string(tmpl)
+			order = append(order, id)
+		}
+		counts[id]++
+	}
+	for _, id := range order {
+		fmt.Printf("%x %d %s\n", id, counts[id], templates[id])
+	}
+	// Output:
+	// 4fb370351a2efcfc 2 duration: $1 statement: SELECT * FROM t WHERE id = $2
+	// 15f3c403a3d296a4 1 invalid input syntax for type integer: $1
+}

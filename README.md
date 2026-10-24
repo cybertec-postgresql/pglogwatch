@@ -174,6 +174,47 @@ err := pglogwatch.ParallelScan(ctx, srcs, pglogwatch.Config{}, 8,
     })
 ```
 
+## Message templates
+
+`AppendTemplate` replaces the values in a record's message with `$1`, `$2`
+and so on, and keeps the words, the identifiers and the shape of an embedded
+statement. Records that differ only by values get the same template.
+`PatternID` hashes severity, SQLSTATE, `TemplateRulesVersion` and the
+template into an 8-byte key for a map.
+
+```go
+var msg []byte
+tmpl := make([]byte, 0, 1100) // AppendTemplate never grows a dst with this much room
+counts := map[[8]byte]int{}
+for p.Next() {
+    r := *p.Record()
+    if r.Flags&pglogwatch.FlagNeedsUnquote != 0 {
+        msg = pglogwatch.AppendUnquoted(msg[:0], r.Message, p.DetectedFormat())
+        r.Message = msg
+    }
+    tmpl = pglogwatch.AppendTemplate(tmpl[:0], &r)
+    counts[pglogwatch.PatternID(&r, tmpl)]++
+}
+```
+
+A few messages and their templates:
+
+| severity, SQLSTATE | message | template |
+|---|---|---|
+| `ERROR 42P01` | `relation "orders_2026" does not exist` | `relation "orders_2026" does not exist` |
+| `ERROR 22P02` | `invalid input syntax for type integer: "abc"` | `invalid input syntax for type integer: $1` |
+| `LOG` | `connection authorized: user=bob database=shop` | `connection authorized: user=$1 database=$2` |
+| `LOG` | `duration: 3.1 ms  execute S_7: select a from b where c in (1, 2, 3)` | `duration: $1 execute $2: select a from b where c in (...)` |
+
+When a rule is in doubt, the helper masks (GUD-001). A template that is too
+coarse costs some precision, and a template that keeps a value leaks it. So a
+double-quoted identifier stays, except in SQLSTATE classes 22 and 23 and
+where its text looks like a value, such as a path or a number. The template
+reads the message as given, so unquote a csvlog or jsonlog message first, as
+above, or one event gives a different template per format. `AppendTemplate`
+does not allocate when `dst` has room, and `PatternID` does not allocate.
+`spec/message-template.md` lists every rule.
+
 ## Concurrency
 
 A `Parser` is not safe for concurrent use, and neither is the `Record` it hands
@@ -275,9 +316,10 @@ guarantee on paths that use it.
 
 ## Status
 
-The public API is frozen for v1.0.0: 40 exported identifiers, each with a doc
-comment, checked on every build. From the tag onward it follows semantic
-versioning — adding an identifier is a minor release, removing or changing one
+The public API was frozen for v1.0.0, and every exported identifier has a doc
+comment, checked on every build. An enumeration counts as one identifier, so
+the root package uses 21 of its budget of 40. From the tag onward it follows
+semantic versioning — adding an identifier is a minor release, removing or changing one
 is a major (PKG-006).
 
 One performance threshold is unmet at the freeze and is recorded rather than
