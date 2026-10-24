@@ -62,7 +62,8 @@ func templateFixtureRecords(t *testing.T) []templateRecord {
 // TestAllocTemplate is AC-004 and CON-001: with templateSpare bytes of spare
 // capacity in dst, AppendTemplate and PatternID perform no heap allocation
 // and AppendTemplate never grows dst. It runs over every input of the
-// template unit tests and every record of the fixture logs.
+// template unit tests, the privacy corpus and every record of the fixture
+// logs.
 func TestAllocTemplate(t *testing.T) {
 	if !allocs.Meaningful {
 		t.Skip("allocation counts are not meaningful in this build")
@@ -74,8 +75,12 @@ func TestAllocTemplate(t *testing.T) {
 			rec:  &Record{Message: []byte(c.in), SQLState: sqlState(t, c.state), Severity: SeverityError},
 		})
 	}
-	// TODO(T013): add the privacy corpus under testdata/template/ once it has
-	// a loader.
+	for _, c := range loadTemplateCorpus(t) {
+		recs = append(recs, templateRecord{
+			name: "privacy/" + strconv.Itoa(c.line),
+			rec:  &Record{Message: []byte(c.message), SQLState: sqlState(t, c.state), Severity: c.severity},
+		})
+	}
 	recs = append(recs, templateFixtureRecords(t)...)
 
 	for _, c := range recs {
