@@ -30,17 +30,31 @@ const TemplateRulesVersion = 1
 // Only r.Message is read for the template; r.SQLState decides how
 // double-quoted tokens are treated. Other fields are ignored.
 func AppendTemplate(dst []byte, r *Record) []byte {
-	// The masking rules come in later. Until then every token is copied as
-	// written, so the template is the message itself, but the message
-	// already goes through the tokenizer the rules will use.
 	z := tokenizer{s: r.Message}
+	var p placeholders
 	for {
 		t, ok := z.next()
 		if !ok {
 			return dst
 		}
+		if masksLiteral(t.kind) {
+			dst = p.appendNext(dst)
+			continue
+		}
 		dst = append(dst, r.Message[t.start:t.end]...)
 	}
+}
+
+// masksLiteral reports whether a token of kind k is a literal value that
+// always becomes a placeholder: a standalone number with its unit (REQ-001),
+// a hex or LSN token (REQ-002), or a single- or dollar-quoted literal
+// (REQ-003). A number inside a word is a tokWord and is not masked.
+func masksLiteral(k tokKind) bool {
+	switch k {
+	case tokNumber, tokHex, tokString, tokDollar:
+		return true
+	}
+	return false
 }
 
 // PatternID returns the pattern identity of a template made by
@@ -76,8 +90,10 @@ func PatternID(r *Record, template []byte) [8]byte {
 //     optional sign and an optional unit (see isUnit). The unit is attached
 //     ("76kB", "0.8%") or, outside statement mode, separated by one space
 //     ("12.345 ms", "16384 kB"); the token covers number and unit. A sign
-//     belongs to the number only when the previous non-space byte is not a
-//     word byte, a closing bracket or a quote, so "a-1" is "a", "-", "1".
+//     belongs to the number only when the byte before it (in statement mode,
+//     the previous non-space byte) is not a word byte, a closing bracket or
+//     a quote, so "a-1" is "a", "-", "1" in both modes, and "a -1" is a
+//     signed number in a message but a subtraction in a statement.
 //     A number followed by word bytes that are not a unit is a word ("1abc").
 //   - tokHex: "0x1F", and outside statement mode an LSN "0/16B3748". An LSN
 //     followed by '/' is left alone so the path rule can take it.
@@ -176,9 +192,14 @@ func (z *tokenizer) numberAt(i int) bool {
 }
 
 // signAllowed reports whether the sign at i belongs to the number after it.
-// It looks back past white space, so "= -1" is signed and "a -1" is not.
+// In statement mode it looks back past white space, so "= -1" is signed and
+// "a -1" is not. In a message a sign after white space is always a sign, so
+// "offset -5" masks the sign with the number.
 func (z *tokenizer) signAllowed(i int) bool {
 	j := i - 1
+	if j >= 0 && isTemplateSpace(z.s[j]) && !z.stmt {
+		return true
+	}
 	for j >= 0 && isTemplateSpace(z.s[j]) {
 		j--
 	}
