@@ -143,8 +143,7 @@ var templateGolden = []struct {
 			"  ->  Hash  (cost=22.00..22.00 rows=1080 width=36) (actual time=0.480..0.481 rows=1080 loops=1)\n" +
 			"        Buckets: 2048  Batches: 1  Memory Usage: 76kB\n" +
 			"        ->  Seq Scan on customers c  (cost=0.00..22.00 rows=1080 width=36) (actual time=0.004..0.210 rows=1080 loops=1)",
-		want:    `duration: $1 plan: …`,
-		pending: "US2/T010",
+		want: `duration: $1 plan: …`,
 	},
 	{
 		name:     "deadlock has nothing to mask",
@@ -421,6 +420,127 @@ func TestAppendTemplateStatements(t *testing.T) {
 	}
 }
 
+// templatePlanCases holds the cases of TestAppendTemplatePlan.
+var templatePlanCases = []templateCase{
+	{"plan at the end of the message", "duration: 1.5 ms plan:", "duration: $1 plan: …"},
+	{"plan text on the same line", "duration: 1.5 ms plan: Seq Scan on t (cost=0.00..1.01 rows=1)", "duration: $1 plan: …"},
+	{"plan in JSON format", "duration: 0.2 ms  plan:\n{\"Query Text\": \"SELECT 'secret'\"}", "duration: $1 plan: …"},
+	{"plan template is a fixed point", "duration: $1 plan: …", "duration: $1 plan: …"},
+	{"plan without a duration stays", "plan: 5 rows", "plan: $1 rows"},
+	{"plan after a word stays", "query plan: 5 rows", "query plan: $1 rows"},
+	{"plan without a space after the colon stays", "duration: 1 ms plan:x", "duration: $1 plan:x"},
+}
+
+// TestAppendTemplatePlan checks REQ-012: after a duration, "plan:" ends the
+// template with "plan: …" and no plan text reaches it.
+func TestAppendTemplatePlan(t *testing.T) {
+	for _, c := range templatePlanCases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// templateCutCases holds the cases of TestAppendTemplateCut. Each message
+// puts a different kind of byte at the 1,024-byte limit.
+var templateCutCases = func() []templateCase {
+	a := strings.Repeat
+	cols := "duration: 2.5 ms  statement: SELECT " + a("abcd, ", 800) + "x FROM t"
+	// The template prefix "duration: $1 statement: SELECT " is 31 bytes, and
+	// 993 bytes is 165 columns of 6 bytes and 3 more, so the cut falls
+	// inside a column name.
+	colsWant := "duration: $1 statement: SELECT " + a("abcd, ", 165) + "abc…"
+	// Eleven numbers become "$1 $2 ... $11 ", 35 bytes. With 986 filler bytes
+	// and a space, "$12" takes bytes 1,022 to 1,024 and the cut would leave
+	// "$1"; the whole placeholder goes instead, with the space before it. A
+	// placeholder that ends at the limit goes too: "…" right after it would
+	// join a key=value value on a second pass.
+	elevens := a("1 ", 11)
+	elevensWant := "$1 $2 $3 $4 $5 $6 $7 $8 $9 $10 $11 "
+	return []templateCase{
+		{"5,000-byte statement", cols, colsWant},
+		{"multibyte character across the limit", a("a", 1023) + "€€ tail", a("a", 1023) + "…"},
+		{"multibyte character ending at the limit", a("a", 1021) + "€€ tail", a("a", 1021) + "€…"},
+		{"placeholder across the limit", elevens + a("a", 986) + " 1 tail", elevensWant + a("a", 986) + "…"},
+		{"placeholder ending at the limit", elevens + a("a", 985) + " 1 tail", elevensWant + a("a", 985) + "…"},
+		{"placeholder before the limit", elevens + a("a", 984) + " 1 x tail", elevensWant + a("a", 984) + " $12 …"},
+		{"key=value before the limit", a("a", 1015) + " user=bob, x", a("a", 1015) + " user=$1 …"},
+		{"key before a masked value", a("a", 1018) + " user=bob tail", a("a", 1018) + " user…"},
+		{"slash that is not a path", a("a", 1021) + " / b", a("a", 1021) + "…"},
+		{"cut template is a fixed point", colsWant, colsWant},
+		{"template of exactly the limit stays", a("a", 1024), a("a", 1024)},
+		{"ellipsis after the limit is not counted", a("a", 1024) + "…", a("a", 1024) + "…"},
+		{"no word before the limit", a("(", 2000), "…"},
+	}
+}()
+
+// TestAppendTemplateCut checks REQ-011: a template over 1,024 bytes keeps at
+// most 1,024 bytes, cut on a UTF-8 boundary and never inside a placeholder,
+// and ends with "…".
+func TestAppendTemplateCut(t *testing.T) {
+	for _, c := range templateCutCases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+			assert.LessOrEqual(t, len(got)-len("keep:"), templateLimit+len(ellipsis))
+		})
+	}
+}
+
+// TestAppendTemplateCutSharesPrefix checks that long statements sharing
+// their first kilobyte share a template, whatever comes after it (REQ-011).
+func TestAppendTemplateCutSharesPrefix(t *testing.T) {
+	head := "duration: 7 ms  statement: SELECT " + strings.Repeat("col_name, ", 200) + "x FROM t "
+	one := AppendTemplate(nil, &Record{Message: []byte(head + "WHERE id = 1")})
+	two := AppendTemplate(nil, &Record{Message: []byte(head + "ORDER BY 2 LIMIT 'secret'")})
+	assert.Equal(t, string(one), string(two))
+	assert.True(t, strings.HasSuffix(string(one), "…"))
+}
+
+// TestAppendTemplateCutList checks that a VALUES list of only literals that
+// starts within the limit is read to its end, so a bulk insert collapses
+// like a short one, and that a list which fails past the limit is cut.
+func TestAppendTemplateCutList(t *testing.T) {
+	rows := strings.Repeat("(1, 'a'), ", 5000)
+	msg := "statement: INSERT INTO t VALUES " + rows + "(2, 'b') RETURNING id"
+	got := AppendTemplate(nil, &Record{Message: []byte(msg)})
+	assert.Equal(t, "statement: INSERT INTO t VALUES (...) RETURNING id", string(got))
+
+	msg = "statement: INSERT INTO t VALUES " + rows + "(now(), 'b')"
+	got = AppendTemplate(nil, &Record{Message: []byte(msg)})
+	assert.True(t, strings.HasPrefix(string(got), "statement: INSERT INTO t VALUES ($1, $2), ($3, $4), "))
+	assert.True(t, strings.HasSuffix(string(got), "…"))
+	assert.LessOrEqual(t, len(got), templateLimit+len(ellipsis))
+	again := AppendTemplate(nil, &Record{Message: got})
+	assert.Equal(t, string(got), string(again))
+}
+
+// TestAppendTemplateCutCapacity checks that a huge message never makes dst
+// grow past the 1,100 bytes of spare capacity the doc comment promises, and
+// that it costs no allocation.
+func TestAppendTemplateCutCapacity(t *testing.T) {
+	const mib = 1 << 20
+	msgs := map[string]string{
+		"word":         "statement: SELECT " + strings.Repeat("x", mib),
+		"literals":     strings.Repeat("1 ", mib/2),
+		"values list":  "statement: INSERT INTO t VALUES " + strings.Repeat("(1), ", mib/5) + "(now())",
+		"in list":      "statement: SELECT 1 WHERE a IN (" + strings.Repeat("123, ", mib/5) + "1)",
+		"key=value":    strings.Repeat("k=v ", mib/4),
+		"comment":      "statement: SELECT /*" + strings.Repeat("x", mib) + "*/ 1",
+		"long literal": "statement: SELECT '" + strings.Repeat("x", mib) + "'",
+	}
+	for name, m := range msgs {
+		t.Run(name, func(t *testing.T) {
+			r := &Record{Message: []byte(m)}
+			dst := make([]byte, 0, 1100)
+			allocs.Zero(t, 5, func() { dst = AppendTemplate(dst[:0], r) })
+			assert.Equal(t, 1100, cap(dst))
+			assert.LessOrEqual(t, len(dst), templateLimit+len(ellipsis))
+		})
+	}
+}
+
 // tok is a token as the tests write it: its kind and its text.
 type tok struct {
 	kind tokKind
@@ -627,6 +747,8 @@ func templateInputs() []templateStateCase {
 		{"key-value", templateKeyValueCases},
 		{"id", templateIDCases},
 		{"path", templatePathCases},
+		{"plan", templatePlanCases},
+		{"cut", templateCutCases},
 	} {
 		for _, c := range set.cases {
 			out = append(out, templateStateCase{set.name + "/" + c.name, "", c.in, c.want})

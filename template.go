@@ -3,6 +3,7 @@ package pglogwatch
 import (
 	"bytes"
 	"strconv"
+	"unicode/utf8"
 )
 
 // TemplateRulesVersion changes whenever a rule change can change a template.
@@ -12,6 +13,15 @@ import (
 // one id. A consumer that stores ids can compare this value to tell old ids
 // from new ones.
 const TemplateRulesVersion = 1
+
+// templateLimit is the most bytes a template keeps before its ellipsis
+// (REQ-011). The ellipsis is not counted, so a cut template is at most
+// templateLimit plus len(ellipsis) bytes long.
+const templateLimit = 1024
+
+// ellipsis ends a template that was cut (REQ-011) or that stops at a plan
+// marker (REQ-012).
+const ellipsis = "\u2026"
 
 // AppendTemplate appends the masked template of r.Message to dst and returns
 // the extended slice.
@@ -26,11 +36,26 @@ const TemplateRulesVersion = 1
 // "execute S_1:" the rest of the message is SQL: its literals are masked, its
 // comments removed, and its keywords and identifiers kept as written.
 //
+// When "plan:" follows a duration, as in auto_explain output, the template
+// ends with "plan: …" and the plan text is not read (REQ-012). A template
+// longer than 1,024 bytes keeps its first 1,024 bytes or fewer and ends with
+// "…" (REQ-011). The 1,024 bytes do not count the ellipsis, so a template is
+// at most 1,027 bytes. The cut falls on a UTF-8 boundary, never inside a
+// placeholder, and drops white space and punctuation before the ellipsis;
+// after a placeholder, " …" ends the template.
+// Masking stops once the template passes the limit, so the rest of a long
+// message is not read; long statements that share their first kilobyte
+// share a template. The one exception is an IN or VALUES list of only
+// literals that starts within the limit: it is read to its end, since it
+// may still collapse to "(...)".
+//
 // r.Message is borrowed from the parser and becomes invalid on the next call
 // to [Parser.Next]. The returned template is written into dst and never
 // aliases r.Message, so it stays valid after that call. AppendTemplate
 // performs no heap allocation when dst has enough capacity; a caller that
 // reuses one buffer, for example dst[:0], pays for the allocation once.
+// AppendTemplate never needs more than 1,100 bytes of spare capacity in dst,
+// whatever the length of the message.
 //
 // Only r.Message is read for the template; r.SQLState decides how
 // double-quoted tokens are treated. Other fields are ignored.
@@ -63,6 +88,8 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	// statement marker.
 	markerOK := true
 	var list listState
+	// plan is true when the message stopped at a plan marker (REQ-012).
+	plan := false
 	// collapse replaces the list that starts at list.start in dst with
 	// "(...)" and gives back the placeholder numbers it used, so the
 	// numbering after the list stays contiguous, as in pg_stat_statements.
@@ -84,7 +111,18 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			fuse, glued, space = -1, false, false
 		}
 	}
+scan:
 	for {
+		if len(dst)-base > templateLimit {
+			// REQ-011: the template is cut below, so stop reading, unless a
+			// list that may collapse began within the limit. The bytes past
+			// the limit are thrown away while such a list is read, so dst does
+			// not grow with it.
+			if list.step < listElem || list.start-base > templateLimit {
+				break
+			}
+			dst = dst[:base+templateLimit+1]
+		}
 		if end, ok := z.pathAt(z.pos); ok {
 			// REQ-007: a bare path is a value up to where pathLen ends it.
 			flush()
@@ -98,7 +136,7 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			if list.step == listClosed {
 				collapse()
 			}
-			return dst
+			break
 		}
 		tb := msg[t.start:t.end]
 		if t.kind == tokSpace || t.kind == tokComment {
@@ -124,6 +162,13 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			list.start, list.n = len(dst), p.n
 		}
 		if !z.stmt && markerOK && t.kind == tokWord {
+			if len(dst) > base && string(tb) == "plan" && colonEnds(msg, t.end) {
+				// REQ-012: auto_explain writes the plan after a duration and
+				// "plan:". The template ends there and the plan is not read.
+				dst = append(dst, "plan: "...)
+				plan = true
+				break scan
+			}
 			if head, colon, ok := stmtMarker(msg, t.start); ok {
 				// REQ-009: keep the marker, mask the prepared statement name and
 				// read the rest of the message as a statement.
@@ -168,7 +213,13 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			} else if fuse < 0 {
 				fuse = len(dst)
 			}
-			dst = append(dst, tb...)
+			// A token longer than the room left before the cut is copied
+			// only up to the cut, which keeps dst small for a huge word.
+			out := tb
+			if room := base + templateLimit + 1 - len(dst); len(out) > room {
+				out = out[:max(room, 0)]
+			}
+			dst = append(dst, out...)
 			glued = false
 		}
 		if t.kind == tokWord {
@@ -180,6 +231,78 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		markerOK = t.kind == tokNumber || t.kind == tokParam
 		prev = t.kind
 	}
+	return cutTemplate(dst, base, plan)
+}
+
+// cutTemplate ends the template dst[base:] (REQ-011, REQ-012). A template
+// of at most templateLimit bytes is returned as it is, with "…" added when
+// it stopped at a plan marker. A trailing "…" is not counted, so a template
+// that was already cut is a fixed point (CON-002).
+//
+// A longer template is cut at the last UTF-8 boundary at or before
+// templateLimit bytes. A placeholder that the cut would split is dropped
+// whole, so "$12" never reads back as "$1". White space and punctuation
+// before the cut are dropped too. The ellipsis then joins the last word and
+// reads back as part of it, so a second pass changes nothing; a lone "…"
+// after a "/" would read back as a path, and after a closed VALUES tuple it
+// would collapse the list. After a placeholder the ellipsis follows a
+// space, since "user=$1…" would read back as one key=value value.
+func cutTemplate(dst []byte, base int, plan bool) []byte {
+	n := len(dst) - base
+	if bytes.HasSuffix(dst[base:], []byte(ellipsis)) {
+		n -= len(ellipsis)
+	}
+	if n <= templateLimit {
+		if plan {
+			dst = append(dst, ellipsis...)
+		}
+		return dst
+	}
+	cut := base + templateLimit
+	for cut > base && !utf8.RuneStart(dst[cut]) {
+		cut--
+	}
+	if isDigit(dst[cut]) {
+		if j := placeholderBefore(dst, base, cut, true); j >= 0 {
+			cut = j
+		}
+	}
+	cut = trimNonWord(dst, base, cut)
+	if j := placeholderBefore(dst, base, cut, false); j >= 0 {
+		if cut-base == templateLimit {
+			// No room for the space: drop the placeholder instead.
+			cut = trimNonWord(dst, base, j)
+		}
+		if placeholderBefore(dst, base, cut, false) >= 0 {
+			dst = append(dst[:cut], ' ')
+			return append(dst, ellipsis...)
+		}
+	}
+	return append(dst[:cut], ellipsis...)
+}
+
+// placeholderBefore returns the index of the '$' of the placeholder whose
+// digits end at dst[i-1], or -1 when there is none. With split set, the
+// placeholder may also have no digits before i, so a cut right after its
+// '$' finds it too.
+func placeholderBefore(dst []byte, base, i int, split bool) int {
+	j := i
+	for j > base && isDigit(dst[j-1]) {
+		j--
+	}
+	if (j < i || split) && j > base && dst[j-1] == '$' {
+		return j - 1
+	}
+	return -1
+}
+
+// trimNonWord returns i moved back over the bytes of dst[base:i] that are
+// not word bytes.
+func trimNonWord(dst []byte, base, i int) int {
+	for i > base && !isWordByte(dst[i-1]) {
+		i--
+	}
+	return i
 }
 
 // listState finds an IN or VALUES list in a statement whose elements are
