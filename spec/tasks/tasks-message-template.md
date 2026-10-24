@@ -100,10 +100,10 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 
 **Independent test**: `go test -run 'Template|Pattern' ./...` passes and the fuzz target runs for 30 s without a crasher.
 
-- [ ] T012 [P] [US4] Build the privacy corpus under `testdata/template/` with at least 200 messages across severities and SQLSTATE classes, each seeded with a marker literal (`'SECRET-1'`, `424242`, `user=SECRET-2`, `"SECRET-3"` in class `22`, an e-mail address in a statement), and `TestTemplatePrivacy` in `template_test.go` asserting no marker survives (AC-002)
-- [ ] T013 [P] [US4] Add `alloc_template_test.go` with `testing.AllocsPerRun` over the corpus and the golden rows, asserting 0 allocations per call of `AppendTemplate` and `PatternID` with a pre-sized `dst` (AC-004, CON-001)
+- [x] T012 [P] [US4] Build the privacy corpus under `testdata/template/` with at least 200 messages across severities and SQLSTATE classes, each seeded with a marker literal (`'SECRET-1'`, `424242`, `user=SECRET-2`, `"SECRET-3"` in class `22`, an e-mail address in a statement), and `TestTemplatePrivacy` in `template_test.go` asserting no marker survives (AC-002)
+- [x] T013 [P] [US4] Add `alloc_template_test.go` with `testing.AllocsPerRun` over the corpus and the golden rows, asserting 0 allocations per call of `AppendTemplate` and `PatternID` with a pre-sized `dst` (AC-004, CON-001)
 - [ ] T014 [P] [US4] Add `FuzzAppendTemplate` to `fuzz_test.go`: never panics, never returns a template over 1,024 bytes plus the ellipsis, never disturbs bytes already in `dst`, and is idempotent (AC-006, AC-005). Register it in `Taskfile.yml` (`fuzz`, `fuzz-release`), in the `.github/workflows/fuzz.yml` matrix, and in the targets table of `FUZZING.md`
-- [ ] T015 [P] [US4] Add `BenchmarkAppendTemplate` reporting ns per record over the existing `testdata` corpus, parsed once and templated in the loop (spec section 6)
+- [x] T015 [P] [US4] Add `BenchmarkAppendTemplate` reporting ns per record over the existing `testdata` corpus, parsed once and templated in the loop (spec section 6)
 
 **Checkpoint**: every acceptance criterion has a test.
 
