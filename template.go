@@ -30,19 +30,113 @@ const TemplateRulesVersion = 1
 // Only r.Message is read for the template; r.SQLState decides how
 // double-quoted tokens are treated. Other fields are ignored.
 func AppendTemplate(dst []byte, r *Record) []byte {
-	z := tokenizer{s: r.Message}
+	msg := r.Message
+	z := tokenizer{s: msg}
 	var p placeholders
+	prev := tokSpace // kind of the token before t
+	idNext := false  // the last word, before white space, is followed by an id
 	for {
 		t, ok := z.next()
 		if !ok {
 			return dst
 		}
-		if masksLiteral(t.kind) {
-			dst = p.appendNext(dst)
+		switch {
+		case t.kind == tokPunct && msg[t.start] == '=' && prev == tokWord:
+			// REQ-004: the word before '=' is a key and stays; everything up
+			// to the end of the value becomes one placeholder. An empty value
+			// gets one too, so "application_name=" and "application_name=psql"
+			// give the same template.
+			dst = p.appendNext(append(dst, '='))
+			z.skipValue()
+			prev, idNext = tokParam, false
 			continue
+		case masksLiteral(t.kind), t.kind == tokWord && idNext && hasDigit(msg[t.start:t.end]):
+			// REQ-006: a word with a digit after an id word, such as the
+			// session id in "session 5f3c1a2b.4d2", is an id. Numeric ids
+			// and the LSN-shaped virtual transaction id "3/1234" are already
+			// literals.
+			dst = p.appendNext(dst)
+		default:
+			dst = append(dst, msg[t.start:t.end]...)
 		}
-		dst = append(dst, r.Message[t.start:t.end]...)
+		switch t.kind {
+		case tokSpace:
+		case tokWord:
+			idNext = isIDWord(msg[t.start:t.end])
+		default:
+			idNext = false
+		}
+		prev = t.kind
 	}
+}
+
+// skipValue moves pos past the value of a key=value pair that starts at pos.
+// The value ends at white space, ',', ';', ')' or the end of the input. It
+// is made of whole tokens, so a quoted value with spaces in it and a number
+// with a spaced unit ("write=12.345 s,") are one value, and "SECRET-2" is
+// skipped whole rather than split at the '-'.
+func (z *tokenizer) skipValue() {
+	for {
+		start := z.pos
+		t, ok := z.next()
+		if !ok {
+			return
+		}
+		if t.kind == tokSpace || t.kind == tokPunct && endsValue(z.s[t.start]) {
+			z.pos = start
+			return
+		}
+	}
+}
+
+func endsValue(c byte) bool {
+	return c == ',' || c == ';' || c == ')'
+}
+
+// idWords are the words PostgreSQL writes before a process, transaction,
+// virtual transaction, object or session id (REQ-006). They match without
+// regard to ASCII case, so "PID", "pid" and "Process" all count.
+var idWords = [...]string{
+	"process", "pid", "backend", "worker",
+	"transaction", "subtransaction", "xid", "multixact",
+	"relation", "database", "tablespace", "role", "oid",
+	"session",
+}
+
+func isIDWord(w []byte) bool {
+	for _, s := range idWords {
+		if equalFoldASCII(w, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// equalFoldASCII reports whether b equals s, which is lower case, ignoring
+// ASCII case.
+func equalFoldASCII(b []byte, s string) bool {
+	if len(b) != len(s) {
+		return false
+	}
+	for i := range b {
+		c := b[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != s[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasDigit(b []byte) bool {
+	for _, c := range b {
+		if isDigit(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // masksLiteral reports whether a token of kind k is a literal value that
