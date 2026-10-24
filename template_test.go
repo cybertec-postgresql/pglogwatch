@@ -79,7 +79,6 @@ var templateGolden = []struct {
 		severity: SeverityLog,
 		message:  `connection authorized: user=bob database=shop application_name=psql`,
 		want:     `connection authorized: user=$1 database=$2 application_name=$3`,
-		pending:  "US1/T005",
 	},
 	{
 		// The two spaces before "statement:" are what PostgreSQL writes;
@@ -114,7 +113,6 @@ var templateGolden = []struct {
 		want: `checkpoint complete: wrote $1 buffers ($2); $3 WAL file(s) added, $4 removed, $5 recycled; ` +
 			`write=$6, sync=$7, total=$8; sync files=$9, longest=$10, average=$11; ` +
 			`distance=$12, estimate=$13; lsn=$14, redo lsn=$15`,
-		pending: "US1/T005",
 	},
 	{
 		// The path is a value even inside double quotes (REQ-007).
@@ -199,6 +197,66 @@ func TestAppendTemplateLiterals(t *testing.T) {
 		{"empty dollar tag", "body $$it's$$ rejected", "body $1 rejected"},
 		{"apostrophe in a word stays", "can't open 3 files", "can't open $1 files"},
 		{"numbering runs left to right", "1 and 'a' and 0x2 and $t$b$t$", "$1 and $2 and $3 and $4"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// TestAppendTemplateKeyValue checks REQ-004: every key stays and every value,
+// whatever its tokens, becomes one placeholder.
+func TestAppendTemplateKeyValue(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"word value", "user=bob database=shop", "user=$1 database=$2"},
+		{"value with punctuation and digits", "user=SECRET-2 database=x", "user=$1 database=$2"},
+		{"empty value at the end", "user=bob application_name=", "user=$1 application_name=$2"},
+		{"empty value before the next key", "application_name= user=bob", "application_name=$1 user=$2"},
+		{"value ends at a comma", "protocol=TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, bits=256)",
+			"protocol=$1, cipher=$2, bits=$3)"},
+		{"value ends at a semicolon", "total=12.401 s; sync files=7", "total=$1; sync files=$2"},
+		{"number with a spaced unit is one value", "write=12.345 s, distance=16384 kB", "write=$1, distance=$2"},
+		{"lsn value", "lsn=0/3000060, redo lsn=0/3000028", "lsn=$1, redo lsn=$2"},
+		{"single-quoted value with a space", "options='-c x=1' user=a", "options=$1 user=$2"},
+		{"double-quoted value with a space", `name="a b" user=a`, "name=$1 user=$2"},
+		{"host and port", "host=[local] port=5432", "host=$1 port=$2"},
+		{"ipv6 host", "host=::1 port=5432", "host=$1 port=$2"},
+		{"value inside parentheses", "(user=bob)", "(user=$1)"},
+		{"spaced equals is not a pair", "x = bob", "x = bob"},
+		{"numbering continues after a pair", "wrote 3 user=bob 4", "wrote $1 user=$2 $3"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// TestAppendTemplateIDs checks REQ-006: the id after a process, transaction,
+// relation, OID or session word becomes a placeholder, also when it is not a
+// plain number. A quoted identifier or a plain word after such a word stays.
+func TestAppendTemplateIDs(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"lock wait", "process 1234 waits for ShareLock on transaction 7890; blocked by process 4321",
+			"process $1 waits for ShareLock on transaction $2; blocked by process $3"},
+		{"virtual transaction", "process 12 waits for ExclusiveLock on virtual transaction 3/1234",
+			"process $1 waits for ExclusiveLock on virtual transaction $2"},
+		{"session id", "session 5f3c1a2b.4d2 ended", "session $1 ended"},
+		{"PID in upper case", "terminating PID 1234", "terminating PID $1"},
+		{"relation oid", "could not open relation 16384", "could not open relation $1"},
+		{"with OID", "cache lookup failed for relation with OID 16384", "cache lookup failed for relation with OID $1"},
+		{"database oid", "database 16384 must be vacuumed", "database $1 must be vacuumed"},
+		{"backend", "backend 5f3c1a2b crashed", "backend $1 crashed"},
+		{"hex word without a leading digit", "session ab12cd.4 ended", "session $1 ended"},
+		{"quoted identifier stays", `relation "orders" does not exist`, `relation "orders" does not exist`},
+		{"plain word stays", "database system is ready", "database system is ready"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
