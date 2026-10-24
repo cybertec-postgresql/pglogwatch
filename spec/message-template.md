@@ -4,7 +4,7 @@ version: 1.1
 date_created: 2026-10-23
 date_updated: 2026-10-24
 owner: pgwatch maintainers
-status: draft
+status: implemented
 tags: [pglogwatch, logs, normalisation, privacy]
 ---
 

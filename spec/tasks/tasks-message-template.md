@@ -112,7 +112,7 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 ## Phase 7: Polish
 
 - [x] T016 [P] Document the helper: an `Example` for `AppendTemplate` and `PatternID` in `example_test.go`, a section in `README.md`, an entry in `RELEASE-NOTES.md`, and the new exported names in `api_surface_test.go` if it lists them
-- [ ] T017 Run `go vet ./...`, `golangci-lint run` if configured, `go test -race ./...` and a 30 s `FuzzAppendTemplate` run; fix what they report; set `status: implemented` in `spec/message-template.md` and tick these tasks
+- [x] T017 Run `go vet ./...`, `golangci-lint run` if configured, `go test -race ./...` and a 30 s `FuzzAppendTemplate` run; fix what they report; set `status: implemented` in `spec/message-template.md` and tick these tasks. Result: vet and golangci-lint clean in all five modules, `task test-race` green, cross builds and purego clean for the four CI targets, `FuzzAppendTemplate` 1,714,474 execs in 60 s with no crasher, `template.go` at 97.6 % statement coverage (root 93.0 %, overall 84.7 %)
 
 ---
 
