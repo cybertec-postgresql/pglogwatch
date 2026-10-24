@@ -55,7 +55,6 @@ var templateGolden = []struct {
 		sqlState: "23505",
 		message:  `duplicate key value violates unique constraint "users_email_key"`,
 		want:     `duplicate key value violates unique constraint $1`,
-		pending:  "US1/T006",
 	},
 	{
 		name:     "invalid input syntax masks the quoted data",
@@ -63,7 +62,6 @@ var templateGolden = []struct {
 		sqlState: "22P02",
 		message:  `invalid input syntax for type integer: "abc"`,
 		want:     `invalid input syntax for type integer: $1`,
-		pending:  "US1/T006",
 	},
 	{
 		// The role name stays: failed authentication is rare and the role
@@ -120,7 +118,6 @@ var templateGolden = []struct {
 		severity: SeverityLog,
 		message:  `temporary file: path "base/pgsql_tmp/pgsql_tmp1234.0", size 1048576`,
 		want:     `temporary file: path $1, size $2`,
-		pending:  "US1/T006",
 	},
 	{
 		// auto_explain writes the plan on the lines after "plan:". None of
@@ -257,6 +254,78 @@ func TestAppendTemplateIDs(t *testing.T) {
 		{"hex word without a leading digit", "session ab12cd.4 ended", "session $1 ended"},
 		{"quoted identifier stays", `relation "orders" does not exist`, `relation "orders" does not exist`},
 		{"plain word stays", "database system is ready", "database system is ready"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// TestAppendTemplateQuoted checks REQ-005: a double-quoted token is an
+// identifier and stays, except under SQLSTATE class 22 or 23, and after a
+// "for <words>:" phrase in any class.
+func TestAppendTemplateQuoted(t *testing.T) {
+	cases := []struct {
+		name, state, in, want string
+	}{
+		{"identifier stays", "42P01", `relation "orders_2026" does not exist`, `relation "orders_2026" does not exist`},
+		{"identifier stays without a SQLSTATE", "", `relation "orders" is locked`, `relation "orders" is locked`},
+		{"class 22 masks every quoted token", "22023", `invalid value "SECRET-3" for "x"`, `invalid value $1 for $2`},
+		{"class 23 masks the constraint", "23503", `insert on table "a" violates foreign key constraint "a_b_fkey"`,
+			`insert on table $1 violates foreign key constraint $2`},
+		{"class 42 is not a data class", "42703", `column "SECRET" does not exist`, `column "SECRET" does not exist`},
+		{"input syntax for type in another class", "XX000", `invalid input syntax for type integer: "abc"`,
+			`invalid input syntax for type integer: $1`},
+		{"input syntax for without type", "XX000", `invalid input syntax for integer: "abc"`,
+			`invalid input syntax for integer: $1`},
+		{"quoted type name", "XX000", `invalid input syntax for type "MyType": "abc"`,
+			`invalid input syntax for type "MyType": $1`},
+		{"enum value", "XX000", `invalid input value for enum mood: "x"`, `invalid input value for enum mood: $1`},
+		{"for without a colon keeps the role", "28P01", `password authentication failed for user "bob"`,
+			`password authentication failed for user "bob"`},
+		{"punctuation drops the for phrase", "28000", `no entry for host "h", user "bob": x "y"`,
+			`no entry for host "h", user "bob": x "y"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &Record{SQLState: sqlState(t, c.state), Message: []byte(c.in)}
+			got := AppendTemplate([]byte("keep:"), r)
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// TestAppendTemplatePaths checks REQ-007: a file path, bare or inside double
+// quotes, becomes one placeholder, while a division or an LSN does not.
+func TestAppendTemplatePaths(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"quoted base path", `temporary file: path "base/pgsql_tmp/pgsql_tmp1234.0", size 1048576`,
+			`temporary file: path $1, size $2`},
+		{"quoted pg_wal path", `could not open file "pg_wal/000000010000000000000001": No such file or directory`,
+			`could not open file $1: No such file or directory`},
+		{"quoted absolute path", `could not open file "/var/lib/postgresql/16/main/postgresql.conf": Permission denied`,
+			`could not open file $1: Permission denied`},
+		{"quoted tablespace path", `could not stat "pg_tblspc/16385/PG_16_202307071/16384"`, `could not stat $1`},
+		{"quoted global path", `could not read "global/pg_control"`, `could not read $1`},
+		{"quoted relative path", `loaded "./conf.d/a.conf"`, `loaded $1`},
+		{"windows path with backslashes", `could not open file "C:\Program Files\PostgreSQL\16\data\pg_hba.conf"`,
+			`could not open file $1`},
+		{"windows path with slashes", `could not open "c:/pgdata/base/1/2"`, `could not open $1`},
+		{"bare absolute path", "listening on Unix socket /var/run/postgresql/.s.PGSQL.5432", "listening on Unix socket $1"},
+		{"bare path before a colon", "could not open /tmp/x.log: denied", "could not open $1: denied"},
+		{"bare path ends a sentence", "archived to /archive/0001.", "archived to $1."},
+		{"bare path in parentheses", "data directory (/srv/pg) is fine", "data directory ($1) is fine"},
+		{"bare windows path", `writing C:\pg\log\a.log now`, "writing $1 now"},
+		{"bare pg_ path", "removing pg_wal/000000010000000000000002", "removing $1"},
+		{"spaced division stays", "operator does not exist: integer / text", "operator does not exist: integer / text"},
+		{"division between words stays", "t/s and (x)/y", "t/s and (x)/y"},
+		{"lsn stays an lsn", "redo at 0/16B3748 done", "redo at $1 done"},
+		{"pg_ word without a slash stays", "pg_stat_statements must be loaded", "pg_stat_statements must be loaded"},
+		{"quoted identifier with a slash stays", `relation "a/b" is odd`, `relation "a/b" is odd`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
