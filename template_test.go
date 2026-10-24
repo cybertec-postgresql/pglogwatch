@@ -1,6 +1,8 @@
 package pglogwatch
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -779,4 +781,122 @@ func TestAppendTemplateIdempotent(t *testing.T) {
 			assert.Equal(t, string(first), string(second))
 		})
 	}
+}
+
+// TestPatternID pins the id of two records to hex values computed outside
+// Go (printf ... | sha256sum) and checks the hash input layout of REQ-010
+// against sha256.Sum256 over a byte string built by hand.
+func TestPatternID(t *testing.T) {
+	cases := []struct {
+		name     string
+		severity Severity
+		state    string
+		message  string
+		input    string
+		want     string
+	}{
+		{
+			name:     "error with a SQLSTATE",
+			severity: SeverityError,
+			state:    "23505",
+			message:  `duplicate key value violates unique constraint "users_email_key"`,
+			input:    "ERROR\x0023505\x001\x00duplicate key value violates unique constraint $1",
+			want:     "ed9b5ca2afdcced5",
+		},
+		{
+			name:     "zero SQLSTATE hashes as no bytes",
+			severity: SeverityLog,
+			message:  "checkpoint starting: time",
+			input:    "LOG\x00\x001\x00checkpoint starting: time",
+			want:     "1e82b007451cb7f3",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &Record{Severity: c.severity, SQLState: sqlState(t, c.state), Message: []byte(c.message)}
+			tmpl := AppendTemplate(nil, r)
+			id := PatternID(r, tmpl)
+			assert.Equal(t, c.want, hex.EncodeToString(id[:]))
+			sum := sha256.Sum256([]byte(c.input))
+			assert.Equal(t, sum[:8], id[:])
+		})
+	}
+}
+
+// TestPatternIDLongTemplate checks that a template longer than any
+// AppendTemplate makes, which takes the streaming path, hashes the same
+// input as the short path would.
+func TestPatternIDLongTemplate(t *testing.T) {
+	r := &Record{Severity: SeverityWarning, SQLState: sqlState(t, "01000")}
+	tmpl := []byte(strings.Repeat("x", 5000))
+	sum := sha256.Sum256(append([]byte("WARNING\x0001000\x001\x00"), tmpl...))
+	id := PatternID(r, tmpl)
+	assert.Equal(t, sum[:8], id[:])
+}
+
+// TestPatternIDAllocs checks that PatternID of a template AppendTemplate
+// made performs no allocation (CON-001).
+func TestPatternIDAllocs(t *testing.T) {
+	r := &Record{Severity: SeverityError, SQLState: sqlState(t, "42P01"), Message: []byte(`relation "t" does not exist`)}
+	tmpl := AppendTemplate(nil, r)
+	var id [8]byte
+	allocs.Zero(t, 100, func() { id = PatternID(r, tmpl) })
+	assert.NotEqual(t, [8]byte{}, id)
+}
+
+// TestSameShapeSameID checks AC-003: records that differ only in values
+// give the same template and the same pattern id, while a different
+// severity, SQLSTATE or template gives a different id.
+func TestSameShapeSameID(t *testing.T) {
+	same := []struct {
+		name, state string
+		a, b        string
+	}{
+		{"different users", "",
+			"connection authorized: user=alice database=shop application_name=psql",
+			"connection authorized: user=bob database=crm application_name=app"},
+		{"different numbers", "",
+			"checkpoint complete: wrote 12 buffers (0.1%); 0 WAL file(s) added",
+			"checkpoint complete: wrote 4096 buffers (12.5%); 3 WAL file(s) added"},
+		{"different literals", "",
+			"statement: SELECT * FROM users WHERE name = 'alice' AND id = 1",
+			"statement: SELECT * FROM users WHERE name = 'bob' AND id = 99"},
+		{"different IN list lengths", "",
+			"statement: SELECT * FROM t WHERE id IN (1, 2, 3)",
+			"statement: SELECT * FROM t WHERE id IN (7)"},
+		{"different durations", "",
+			"duration: 12.345 ms  statement: SELECT 1",
+			"duration: 0.5 ms  statement: SELECT 42"},
+	}
+	for _, c := range same {
+		t.Run(c.name, func(t *testing.T) {
+			ra := &Record{Severity: SeverityLog, SQLState: sqlState(t, c.state), Message: []byte(c.a)}
+			rb := &Record{Severity: SeverityLog, SQLState: sqlState(t, c.state), Message: []byte(c.b)}
+			ta, tb := AppendTemplate(nil, ra), AppendTemplate(nil, rb)
+			assert.Equal(t, string(ta), string(tb))
+			assert.Equal(t, PatternID(ra, ta), PatternID(rb, tb))
+		})
+	}
+
+	base := &Record{Severity: SeverityError, SQLState: sqlState(t, "42P01"), Message: []byte(`relation "t" does not exist`)}
+	tmpl := AppendTemplate(nil, base)
+	id := PatternID(base, tmpl)
+	t.Run("different severity", func(t *testing.T) {
+		r := *base
+		r.Severity = SeverityFatal
+		assert.NotEqual(t, id, PatternID(&r, tmpl))
+	})
+	t.Run("different SQLSTATE", func(t *testing.T) {
+		r := *base
+		r.SQLState = sqlState(t, "42P02")
+		assert.NotEqual(t, id, PatternID(&r, tmpl))
+	})
+	t.Run("zero SQLSTATE", func(t *testing.T) {
+		r := *base
+		r.SQLState = [5]byte{}
+		assert.NotEqual(t, id, PatternID(&r, tmpl))
+	})
+	t.Run("different template", func(t *testing.T) {
+		assert.NotEqual(t, id, PatternID(base, []byte(`relation $1 does not exist`)))
+	})
 }
