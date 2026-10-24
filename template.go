@@ -86,7 +86,9 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	base := len(dst)
 	// markerOK is true at the start of the message and right after a masked
 	// number such as the duration, the two places where PostgreSQL writes a
-	// statement marker.
+	// statement marker. After the number, white space must come before the
+	// marker. Any other placeholder counts as well, except a key=value
+	// value, since each one reads back as a $n that would count (CON-002).
 	markerOK := true
 	var list listState
 	// plan is true when the message stopped at a plan marker (REQ-012).
@@ -129,7 +131,7 @@ scan:
 			flush()
 			mask()
 			z.pos = end
-			prev, idNext, after, markerOK = tokParam, false, forNone, false
+			prev, idNext, after, markerOK = tokParam, false, forNone, true
 			continue
 		}
 		t, ok := z.next()
@@ -145,9 +147,13 @@ scan:
 			prev = tokSpace
 			continue
 		}
+		// A marker must start the message or follow white space, so that
+		// "$1statement:", which a literal glued to a word becomes, does not
+		// read back as one.
+		spaced := space || len(dst) == base
 		var act listAction
 		if z.stmt {
-			act = list.next(t.kind, tb)
+			act = list.next(t.kind, tb, !space)
 		}
 		switch act {
 		case listCollapse:
@@ -162,7 +168,7 @@ scan:
 		if act == listOpen {
 			list.start, list.n = len(dst), p.n
 		}
-		if !z.stmt && markerOK && t.kind == tokWord {
+		if !z.stmt && markerOK && spaced && t.kind == tokWord {
 			if len(dst) > base && string(tb) == "plan" && colonEnds(msg, t.end) {
 				// REQ-012: auto_explain writes the plan after a duration and
 				// "plan:". The template ends there and the plan is not read.
@@ -170,10 +176,10 @@ scan:
 				plan = true
 				break scan
 			}
-			if head, colon, ok := stmtMarker(msg, t.start); ok {
+			if m, head, colon, ok := stmtMarker(msg, t.start); ok {
 				// REQ-009: keep the marker, mask the prepared statement name and
 				// read the rest of the message as a statement.
-				dst, fuse = append(dst, msg[t.start:head]...), -1
+				dst, fuse = append(dst, m...), -1
 				if colon > head {
 					mask()
 				}
@@ -229,7 +235,7 @@ scan:
 			idNext = false
 		}
 		after = after.next(t.kind, tb)
-		markerOK = t.kind == tokNumber || t.kind == tokParam
+		markerOK = glued
 		prev = t.kind
 	}
 	return cutTemplate(dst, base, plan)
@@ -316,11 +322,23 @@ func trimNonWord(dst []byte, base, i int) int {
 //
 // A VALUES list is collapsed only at the first token after its last ')',
 // so a later tuple that does not qualify keeps the whole list as written.
+//
+// An element may also be written as one placeholder although it is more
+// than one token: words and '$' bytes right before a literal join its
+// placeholder ("A”" and "$'x'" become "$1"), and so does a word that
+// starts with a digit right after one ("'a'1abc"). The list reads such an
+// element as one literal too, or the template would collapse when it is
+// masked again (CON-002).
 type listState struct {
 	step   listStep
 	values bool  // the list follows VALUES, so more tuples may follow
 	start  int   // where the list's '(' is in dst
 	n      int64 // the placeholder count before the list
+	// kw and kwValues are the step and values flag that the last word of a
+	// listFuse run would have set by itself, so that run can still start a
+	// list when no literal follows it.
+	kw       listStep
+	kwValues bool
 }
 
 type listStep uint8
@@ -332,6 +350,7 @@ const (
 	listSep              // a literal seen, waiting for ',' or ')'
 	listClosed           // a VALUES tuple closed, waiting for ',' or the end
 	listNext             // ',' after a VALUES tuple, waiting for '('
+	listFuse             // words or '$' bytes seen where an element starts, waiting for a literal right after them
 )
 
 // listAction tells AppendTemplate what to do with the token passed to next.
@@ -345,9 +364,12 @@ const (
 )
 
 // next moves the state past a token of kind k with text b, which is not
-// white space or a comment, and returns what to do with the token.
-func (l *listState) next(k tokKind, b []byte) listAction {
+// white space or a comment, and returns what to do with the token. adjacent
+// is true when no white space or comment came between the previous token
+// and this one.
+func (l *listState) next(k tokKind, b []byte, adjacent bool) listAction {
 	punct := func(c byte) bool { return k == tokPunct && b[0] == c }
+	joins := k == tokWord || punct('$')
 	act := listKeep
 	switch l.step {
 	case listKeyword, listNext:
@@ -364,8 +386,29 @@ func (l *listState) next(k tokKind, b []byte) listAction {
 			l.step = listSep
 			return listKeep
 		}
+		if joins {
+			l.step = listFuse
+			l.setKeyword(k, b)
+			return listKeep
+		}
+	case listFuse:
+		switch {
+		case adjacent && masksLiteral(k):
+			l.step = listSep
+			return listKeep
+		case adjacent && joins:
+			l.setKeyword(k, b)
+			return listKeep
+		}
+		// No literal follows the run, so it is not an element; go on as if
+		// its last word had been read on its own.
+		l.step, l.values = l.kw, l.kwValues
+		return l.next(k, b, adjacent)
 	case listSep:
 		switch {
+		case adjacent && k == tokWord && isDigit(b[0]):
+			// The placeholder of the literal before takes this word.
+			return listKeep
 		case punct(','):
 			l.step = listElem
 			return listKeep
@@ -394,44 +437,81 @@ func (l *listState) next(k tokKind, b []byte) listAction {
 	return act
 }
 
+// setKeyword records in kw and kwValues the step that the token of kind k
+// with text b would set outside a list.
+func (l *listState) setKeyword(k tokKind, b []byte) {
+	l.kw, l.kwValues = listNone, false
+	if k == tokWord {
+		if equalFoldASCII(b, "in") {
+			l.kw = listKeyword
+		} else if equalFoldASCII(b, "values") {
+			l.kw, l.kwValues = listKeyword, true
+		}
+	}
+}
+
 // stmtMarker reports whether a statement marker starts at i (REQ-009), and
-// returns the end of its words and the index of its ':'. The markers are
-// "statement:", "fastpath function call:", and "execute", "parse" or "bind"
-// with a prepared statement name before the ':'; "execute fetch from" names
-// a statement too. The ':' must end the input or come before white space.
-// When the marker has a name, it is s[head:colon], and s[i:head] ends with
-// the space before it; otherwise head equals colon.
+// returns its words as the template writes them, the end of its words in s
+// and the index of its ':'. The markers are "statement:", "fastpath function
+// call:", and "execute", "parse" or "bind" with a prepared statement name
+// before the ':'; "execute fetch from" names a statement too. The ':' must
+// end the input or come before white space. When the marker has a name, it
+// is s[head:colon], and m ends with one space for the white space before
+// it; otherwise head equals colon. Any run of white space between the words
+// matches, since the template collapses it to one space and must find the
+// same marker again (CON-002).
 //
 // The name is masked, "<unnamed>" included. A driver such as pgJDBC runs a
 // query as the unnamed statement a few times before it prepares it as S_n,
 // so masking the name keeps both in one template; the marker word still
 // tells execute, parse and bind apart. A name that holds white space or ':'
 // is not recognised.
-func stmtMarker(s []byte, i int) (head, colon int, ok bool) {
-	rest := s[i:]
+func stmtMarker(s []byte, i int) (m string, head, colon int, ok bool) {
 	for _, m := range [...]string{"statement", "fastpath function call"} {
-		if hasPrefix(rest, m) && colonEnds(s, i+len(m)) {
-			return i + len(m), i + len(m), true
+		if end, ok := matchWords(s, i, m); ok && colonEnds(s, end) {
+			return m, end, end, true
 		}
 	}
 	head = -1
-	for _, m := range [...]string{"execute fetch from ", "execute ", "parse ", "bind "} {
-		if hasPrefix(rest, m) {
-			head = i + len(m)
+	for _, w := range [...]string{"execute fetch from ", "execute ", "parse ", "bind "} {
+		if end, ok := matchWords(s, i, w); ok {
+			m, head = w, end
 			break
 		}
 	}
 	if head < 0 {
-		return 0, 0, false
+		return "", 0, 0, false
 	}
 	j := head
 	for j < len(s) && s[j] != ':' && !isTemplateSpace(s[j]) {
 		j++
 	}
 	if j == head || !colonEnds(s, j) {
-		return 0, 0, false
+		return "", 0, 0, false
 	}
-	return head, j, true
+	return m, head, j, true
+}
+
+// matchWords reports whether s at i starts with the words of m, and returns
+// the end of the match. A space in m matches a run of one or more white
+// space bytes in s.
+func matchWords(s []byte, i int, m string) (int, bool) {
+	for k := 0; k < len(m); k++ {
+		if m[k] == ' ' {
+			if i >= len(s) || !isTemplateSpace(s[i]) {
+				return 0, false
+			}
+			for i < len(s) && isTemplateSpace(s[i]) {
+				i++
+			}
+			continue
+		}
+		if i >= len(s) || s[i] != m[k] {
+			return 0, false
+		}
+		i++
+	}
+	return i, true
 }
 
 // colonEnds reports whether s[j] is a ':' at the end of s or before white
