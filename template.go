@@ -62,6 +62,15 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	// number such as the duration, the two places where PostgreSQL writes a
 	// statement marker.
 	markerOK := true
+	var list listState
+	// collapse replaces the list that starts at list.start in dst with
+	// "(...)" and gives back the placeholder numbers it used, so the
+	// numbering after the list stays contiguous, as in pg_stat_statements.
+	collapse := func() {
+		dst = append(dst[:list.start], "(...)"...)
+		p.n = list.n
+		fuse, glued = -1, false
+	}
 	mask := func() {
 		if fuse >= 0 {
 			dst = dst[:fuse]
@@ -86,6 +95,9 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		}
 		t, ok := z.next()
 		if !ok {
+			if list.step == listClosed {
+				collapse()
+			}
 			return dst
 		}
 		tb := msg[t.start:t.end]
@@ -94,7 +106,23 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			prev = tokSpace
 			continue
 		}
+		var act listAction
+		if z.stmt {
+			act = list.next(t.kind, tb)
+		}
+		switch act {
+		case listCollapse:
+			collapse()
+		case listCollapseClose:
+			// The ')' ends an IN list; the space before it goes with it.
+			collapse()
+			space, prev, markerOK = false, tokPunct, false
+			continue
+		}
 		flush()
+		if act == listOpen {
+			list.start, list.n = len(dst), p.n
+		}
 		if !z.stmt && markerOK && t.kind == tokWord {
 			if head, colon, ok := stmtMarker(msg, t.start); ok {
 				// REQ-009: keep the marker, mask the prepared statement name and
@@ -152,6 +180,94 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		markerOK = t.kind == tokNumber || t.kind == tokParam
 		prev = t.kind
 	}
+}
+
+// listState finds an IN or VALUES list in a statement whose elements are
+// all literals, which REQ-009 collapses to "(...)". It reads one token at a
+// time, white space and comments left out. An IN list is one parenthesised
+// list; a VALUES list is one or more of them separated by ','. An element
+// is one literal token: a nested '(', a cast, an operator or a word makes
+// the list stay as written. "NOT IN (1, 2)" collapses too, since the IN
+// keyword starts the list. "= ANY(ARRAY[1, 2])" does not.
+//
+// A VALUES list is collapsed only at the first token after its last ')',
+// so a later tuple that does not qualify keeps the whole list as written.
+type listState struct {
+	step   listStep
+	values bool  // the list follows VALUES, so more tuples may follow
+	start  int   // where the list's '(' is in dst
+	n      int64 // the placeholder count before the list
+}
+
+type listStep uint8
+
+const (
+	listNone    listStep = iota
+	listKeyword          // IN or VALUES seen, waiting for '('
+	listElem             // '(' or ',' seen, waiting for a literal
+	listSep              // a literal seen, waiting for ',' or ')'
+	listClosed           // a VALUES tuple closed, waiting for ',' or the end
+	listNext             // ',' after a VALUES tuple, waiting for '('
+)
+
+// listAction tells AppendTemplate what to do with the token passed to next.
+type listAction uint8
+
+const (
+	listKeep          listAction = iota // write the token as usual
+	listOpen                            // the token is the list's '(', record where it goes
+	listCollapse                        // collapse the list, then write the token as usual
+	listCollapseClose                   // the token is the ')' that ends an IN list; collapse and drop it
+)
+
+// next moves the state past a token of kind k with text b, which is not
+// white space or a comment, and returns what to do with the token.
+func (l *listState) next(k tokKind, b []byte) listAction {
+	punct := func(c byte) bool { return k == tokPunct && b[0] == c }
+	act := listKeep
+	switch l.step {
+	case listKeyword, listNext:
+		if punct('(') {
+			open := l.step == listKeyword
+			l.step = listElem
+			if open {
+				return listOpen
+			}
+			return listKeep
+		}
+	case listElem:
+		if masksLiteral(k) {
+			l.step = listSep
+			return listKeep
+		}
+	case listSep:
+		switch {
+		case punct(','):
+			l.step = listElem
+			return listKeep
+		case punct(')') && l.values:
+			l.step = listClosed
+			return listKeep
+		case punct(')'):
+			l.step = listNone
+			return listCollapseClose
+		}
+	case listClosed:
+		if punct(',') {
+			l.step = listNext
+			return listKeep
+		}
+		act = listCollapse
+	}
+	l.step = listNone
+	if k == tokWord {
+		if equalFoldASCII(b, "in") {
+			l.step, l.values = listKeyword, false
+		} else if equalFoldASCII(b, "values") {
+			l.step, l.values = listKeyword, true
+		}
+	}
+	return act
 }
 
 // stmtMarker reports whether a statement marker starts at i (REQ-009), and

@@ -104,7 +104,6 @@ var templateGolden = []struct {
 		severity: SeverityLog,
 		message:  `duration: 3.1 ms  execute S_7: select a from b where c in (1, 2, 3)`,
 		want:     `duration: $1 execute $2: select a from b where c in (...)`,
-		pending:  "US2/T009",
 	},
 	{
 		// The spec abbreviates this row with an ellipsis. This is the full
@@ -354,7 +353,7 @@ var templateStatementCases = []templateStateCase{
 	{"execute the unnamed statement", "", "execute <unnamed>: SELECT 1", "execute $1: SELECT $2"},
 	{"execute fetch from a portal", "", "execute fetch from S_2/C_3: SELECT 1", "execute fetch from $1: SELECT $2"},
 	{"parse", "", "duration: 0.1 ms  parse S_3: INSERT INTO t VALUES ($1)",
-		"duration: $1 parse $2: INSERT INTO t VALUES ($3)"},
+		"duration: $1 parse $2: INSERT INTO t VALUES (...)"},
 	{"bind", "", "duration: 0.1 ms  bind <unnamed>: UPDATE t SET a = 'x'", "duration: $1 bind $2: UPDATE t SET a = $3"},
 	{"fastpath function call", "", `fastpath function call: "lo_open" (OID 952)`,
 		`fastpath function call: "lo_open" (OID $1)`},
@@ -369,7 +368,7 @@ var templateStatementCases = []templateStateCase{
 	{"keyword case stays", "", "statement: Select A From T", "statement: Select A From T"},
 	{"quoted identifier stays", "", `statement: SELECT "Name" FROM "T"`, `statement: SELECT "Name" FROM "T"`},
 	{"quoted identifier stays in class 23", "23505", `statement: INSERT INTO "users" VALUES (1)`,
-		`statement: INSERT INTO "users" VALUES ($1)`},
+		`statement: INSERT INTO "users" VALUES (...)`},
 	{"equals is not a key", "", "statement: SELECT * FROM t WHERE a=b", "statement: SELECT * FROM t WHERE a=b"},
 	{"id word is a column", "", "statement: SELECT pid FROM s WHERE relation = x1", "statement: SELECT pid FROM s WHERE relation = x1"},
 	{"slash is a division", "", "statement: SELECT a /b, c/2 FROM t", "statement: SELECT a /b, c/$1 FROM t"},
@@ -380,12 +379,38 @@ var templateStatementCases = []templateStateCase{
 	{"white space collapses in the message", "", "  wrote  3\tbuffers \n", "wrote $1 buffers"},
 	{"template is a fixed point", "", "$1 statement: SELECT $2", "$1 statement: SELECT $2"},
 	{"masked name survives", "", "duration: $1 execute $2: SELECT $3", "duration: $1 execute $2: SELECT $3"},
+	{"IN list collapses", "", "statement: SELECT a FROM t WHERE c IN (1, 'x', $3)",
+		"statement: SELECT a FROM t WHERE c IN (...)"},
+	{"IN list keeps the numbering contiguous", "", "duration: 1 ms  execute S_1: select a from b where c in (1, 2, 3) and d = 4",
+		"duration: $1 execute $2: select a from b where c in (...) and d = $3"},
+	{"IN keyword case stays", "", "statement: SELECT 1 WHERE a In ( 1 ,2 )", "statement: SELECT $1 WHERE a In (...)"},
+	{"NOT IN list collapses", "", "statement: SELECT 1 WHERE a NOT IN (1, 2)", "statement: SELECT $1 WHERE a NOT IN (...)"},
+	{"IN list with a comment collapses", "", "statement: SELECT 1 WHERE a in (1, /* two */ 2)", "statement: SELECT $1 WHERE a in (...)"},
+	{"IN list with a negative number collapses", "", "statement: SELECT 1 WHERE a in (-1, 2)", "statement: SELECT $1 WHERE a in (...)"},
+	{"IN list with a column stays", "", "statement: SELECT 1 WHERE x IN (a, 1)", "statement: SELECT $1 WHERE x IN (a, $2)"},
+	{"IN subquery stays", "", "statement: SELECT 1 WHERE x IN (select 1)", "statement: SELECT $1 WHERE x IN (select $2)"},
+	{"IN list with a cast stays", "", "statement: SELECT 1 WHERE x IN (1::int)", "statement: SELECT $1 WHERE x IN ($2::int)"},
+	{"empty IN list stays", "", "statement: SELECT 1 WHERE x IN ()", "statement: SELECT $1 WHERE x IN ()"},
+	{"IN list without a closing paren stays", "", "statement: SELECT 1 WHERE x IN (1, 2", "statement: SELECT $1 WHERE x IN ($2, $3"},
+	{"ANY array stays", "", "statement: SELECT 1 WHERE x = ANY(ARRAY[1, 2])", "statement: SELECT $1 WHERE x = ANY(ARRAY[$2, $3])"},
+	{"VALUES tuples collapse", "", "statement: INSERT INTO t VALUES (1, 'a'), ($1, 'b') RETURNING id",
+		"statement: INSERT INTO t VALUES (...) RETURNING id"},
+	{"VALUES keeps the numbering contiguous", "", "statement: INSERT INTO t VALUES (1), (2) ON CONFLICT (a) DO UPDATE SET b = 3",
+		"statement: INSERT INTO t VALUES (...) ON CONFLICT (a) DO UPDATE SET b = $1"},
+	{"VALUES at the end collapses", "", "statement: insert into t values (1)", "statement: insert into t values (...)"},
+	{"VALUES before a semicolon collapses", "", "statement: INSERT INTO t VALUES (1);", "statement: INSERT INTO t VALUES (...);"},
+	{"VALUES with a function stays", "", "statement: INSERT INTO t VALUES (1, now())", "statement: INSERT INTO t VALUES ($1, now())"},
+	{"VALUES with a bad later tuple stays", "", "statement: INSERT INTO t VALUES (1), (now())",
+		"statement: INSERT INTO t VALUES ($1), (now())"},
+	{"collapsed IN is a fixed point", "", "statement: SELECT 1 WHERE a IN (...)", "statement: SELECT $1 WHERE a IN (...)"},
+	{"collapsed VALUES is a fixed point", "", "statement: INSERT INTO t VALUES (...)", "statement: INSERT INTO t VALUES (...)"},
+	{"IN in a message stays", "", "value in (1, 2) is out of range", "value in ($1, $2) is out of range"},
 }
 
-// TestAppendTemplateStatements checks REQ-009 without the list collapse: the
-// marker stays, the prepared statement name and the literals become
-// placeholders, comments go, white space collapses, and keywords and
-// identifiers stay as written.
+// TestAppendTemplateStatements checks REQ-009: the marker stays, the
+// prepared statement name and the literals become placeholders, IN and
+// VALUES lists of only literals collapse, comments go, white space
+// collapses, and keywords and identifiers stay as written.
 func TestAppendTemplateStatements(t *testing.T) {
 	for _, c := range templateStatementCases {
 		t.Run(c.name, func(t *testing.T) {
