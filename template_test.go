@@ -172,6 +172,42 @@ func TestAppendTemplateGolden(t *testing.T) {
 	}
 }
 
+// TestAppendTemplateLiterals checks the literal rules of T004 one by one:
+// standalone numbers with their units (REQ-001), hex and LSN tokens
+// (REQ-002), and single- and dollar-quoted literals (REQ-003). The messages
+// avoid key=value pairs, ids, paths and double quotes, whose rules come in
+// later tasks.
+func TestAppendTemplateLiterals(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"integer", "sorted 42 rows", "sorted $1 rows"},
+		{"number inside a word stays", "pg_stat_16 stays", "pg_stat_16 stays"},
+		{"digit at the end of a word stays", "type xid8 is wide", "type xid8 is wide"},
+		{"signed integer", "offset -5 is negative", "offset $1 is negative"},
+		{"scientific", "cost 1.5e3 and 2.5E-3", "cost $1 and $2"},
+		{"decimal without a leading digit", "ratio .25 used", "ratio $1 used"},
+		{"spaced unit", "took 12 ms to run", "took $1 to run"},
+		{"attached unit and percent", "used 76kB (0.8%)", "used $1 ($2)"},
+		{"hex", "flags 0x1F set", "flags $1 set"},
+		{"lsn", "redo starts at 0/16B3748", "redo starts at $1"},
+		{"single-quoted literal", "value 'secret' rejected", "value $1 rejected"},
+		{"doubled quote", "value 'it''s' rejected", "value $1 rejected"},
+		{"backslash escape", `value E'a\'b' rejected`, "value $1 rejected"},
+		{"unicode literal", `value U&'d\0061' rejected`, "value $1 rejected"},
+		{"dollar-quoted literal", "body $q$x$q$ rejected", "body $1 rejected"},
+		{"empty dollar tag", "body $$it's$$ rejected", "body $1 rejected"},
+		{"apostrophe in a word stays", "can't open 3 files", "can't open $1 files"},
+		{"numbering runs left to right", "1 and 'a' and 0x2 and $t$b$t$", "$1 and $2 and $3 and $4"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AppendTemplate([]byte("keep:"), &Record{Message: []byte(c.in)})
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
 // tok is a token as the tests write it: its kind and its text.
 type tok struct {
 	kind tokKind
@@ -229,6 +265,8 @@ func TestTokenizerValues(t *testing.T) {
 			[]tok{{tokNumber, "-5"}, {tokNumber, "+2"}}},
 		{"minus after an operand is an operator", "a-1 a -1 (b)-2", true,
 			[]tok{{tokNumber, "1"}, {tokNumber, "1"}, {tokNumber, "2"}}},
+		{"sign after a space in a message", "a-1 a -1 a - 1", false,
+			[]tok{{tokNumber, "1"}, {tokNumber, "-1"}, {tokNumber, "1"}}},
 		{"version string", "16.4.1", false, []tok{{tokNumber, "16.4"}, {tokNumber, "1"}}},
 		{"hex", "0x1F 0Xff 0x1g", false, []tok{{tokHex, "0x1F"}, {tokHex, "0Xff"}}},
 		{"lsn", "lsn=0/3000060, redo lsn=A/16B3748.", false,
