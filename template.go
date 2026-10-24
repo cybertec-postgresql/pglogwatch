@@ -21,6 +21,11 @@ const TemplateRulesVersion = 1
 // and identifiers stay. Two records that differ only by values give the same
 // template, which is what lets a consumer group and count log events.
 //
+// Every run of white space becomes one space, and a run at the start or the
+// end is dropped. After a statement marker such as "statement:" or
+// "execute S_1:" the rest of the message is SQL: its literals are masked, its
+// comments removed, and its keywords and identifiers kept as written.
+//
 // r.Message is borrowed from the parser and becomes invalid on the next call
 // to [Parser.Next]. The returned template is written into dst and never
 // aliases r.Message, so it stays valid after that call. AppendTemplate
@@ -47,6 +52,16 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	// starts with a digit would extend its number ("$1" and "0abc" read back
 	// as "$10" and "abc"), so the placeholder takes that word too.
 	glued := false
+	// space is true when white space or a comment came after the last token
+	// written. One space stands for the whole run and is written only before
+	// the next token, so a run at the start or the end of the message is
+	// dropped (REQ-009).
+	space := false
+	base := len(dst)
+	// markerOK is true at the start of the message and right after a masked
+	// number such as the duration, the two places where PostgreSQL writes a
+	// statement marker.
+	markerOK := true
 	mask := func() {
 		if fuse >= 0 {
 			dst = dst[:fuse]
@@ -54,12 +69,19 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		dst = p.appendNext(dst)
 		fuse, glued = -1, true
 	}
+	flush := func() {
+		if space {
+			dst = append(dst, ' ')
+			fuse, glued, space = -1, false, false
+		}
+	}
 	for {
 		if end, ok := z.pathAt(z.pos); ok {
 			// REQ-007: a bare path is a value up to where pathLen ends it.
+			flush()
 			mask()
 			z.pos = end
-			prev, idNext, after = tokParam, false, forNone
+			prev, idNext, after, markerOK = tokParam, false, forNone, false
 			continue
 		}
 		t, ok := z.next()
@@ -67,26 +89,48 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			return dst
 		}
 		tb := msg[t.start:t.end]
+		if t.kind == tokSpace || t.kind == tokComment {
+			space = len(dst) > base
+			prev = tokSpace
+			continue
+		}
+		flush()
+		if !z.stmt && markerOK && t.kind == tokWord {
+			if head, colon, ok := stmtMarker(msg, t.start); ok {
+				// REQ-009: keep the marker, mask the prepared statement name and
+				// read the rest of the message as a statement.
+				dst, fuse = append(dst, msg[t.start:head]...), -1
+				if colon > head {
+					mask()
+				}
+				dst, fuse, glued = append(dst, ':'), -1, false
+				z.pos, z.stmt = colon+1, true
+				prev = tokPunct
+				continue
+			}
+		}
 		switch {
-		case t.kind == tokPunct && tb[0] == '=' && prev == tokWord:
+		case !z.stmt && t.kind == tokPunct && tb[0] == '=' && prev == tokWord:
 			// REQ-004: the word before '=' is a key and stays; everything up
 			// to the end of the value becomes one placeholder. An empty value
 			// gets one too, so "application_name=" and "application_name=psql"
-			// give the same template.
+			// give the same template. In a statement '=' is an operator.
 			dst, fuse = append(dst, '='), -1
 			mask()
 			z.skipValue()
-			prev, idNext, after = tokParam, false, forNone
+			prev, idNext, after, markerOK = tokParam, false, forNone, false
 			continue
-		case masksLiteral(t.kind), t.kind == tokWord && idNext && hasDigit(tb):
+		case masksLiteral(t.kind), !z.stmt && t.kind == tokWord && idNext && hasDigit(tb):
 			// REQ-006: a word with a digit after an id word, such as the
 			// session id in "session 5f3c1a2b.4d2", is an id. Numeric ids
 			// and the LSN-shaped virtual transaction id "3/1234" are already
-			// literals.
+			// literals. In a statement a word is a keyword or an identifier.
 			mask()
-		case t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(tb)):
+		case !z.stmt && t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(tb)):
 			// REQ-005 and REQ-007: a double-quoted token is an identifier
-			// and stays, unless it holds data or a path.
+			// and stays, unless it holds data or a path. In a statement it is
+			// always an identifier, whatever the SQLSTATE class, so it stays
+			// (REQ-009).
 			mask()
 		case glued && t.kind == tokWord && isDigit(tb[0]):
 			// The placeholder before this word takes it; see glued.
@@ -99,16 +143,61 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			dst = append(dst, tb...)
 			glued = false
 		}
-		switch t.kind {
-		case tokSpace:
-		case tokWord:
+		if t.kind == tokWord {
 			idNext = isIDWord(tb)
-		default:
+		} else {
 			idNext = false
 		}
 		after = after.next(t.kind, tb)
+		markerOK = t.kind == tokNumber || t.kind == tokParam
 		prev = t.kind
 	}
+}
+
+// stmtMarker reports whether a statement marker starts at i (REQ-009), and
+// returns the end of its words and the index of its ':'. The markers are
+// "statement:", "fastpath function call:", and "execute", "parse" or "bind"
+// with a prepared statement name before the ':'; "execute fetch from" names
+// a statement too. The ':' must end the input or come before white space.
+// When the marker has a name, it is s[head:colon], and s[i:head] ends with
+// the space before it; otherwise head equals colon.
+//
+// The name is masked, "<unnamed>" included. A driver such as pgJDBC runs a
+// query as the unnamed statement a few times before it prepares it as S_n,
+// so masking the name keeps both in one template; the marker word still
+// tells execute, parse and bind apart. A name that holds white space or ':'
+// is not recognised.
+func stmtMarker(s []byte, i int) (head, colon int, ok bool) {
+	rest := s[i:]
+	for _, m := range [...]string{"statement", "fastpath function call"} {
+		if hasPrefix(rest, m) && colonEnds(s, i+len(m)) {
+			return i + len(m), i + len(m), true
+		}
+	}
+	head = -1
+	for _, m := range [...]string{"execute fetch from ", "execute ", "parse ", "bind "} {
+		if hasPrefix(rest, m) {
+			head = i + len(m)
+			break
+		}
+	}
+	if head < 0 {
+		return 0, 0, false
+	}
+	j := head
+	for j < len(s) && s[j] != ':' && !isTemplateSpace(s[j]) {
+		j++
+	}
+	if j == head || !colonEnds(s, j) {
+		return 0, 0, false
+	}
+	return head, j, true
+}
+
+// colonEnds reports whether s[j] is a ':' at the end of s or before white
+// space.
+func colonEnds(s []byte, j int) bool {
+	return j < len(s) && s[j] == ':' && (j+1 == len(s) || isTemplateSpace(s[j+1]))
 }
 
 // isDataClass reports whether a SQLSTATE is in class 22 (data exception) or
@@ -372,8 +461,9 @@ func PatternID(r *Record, template []byte) [8]byte {
 //   - tokParam: an existing $n placeholder. A rule writes a fresh placeholder
 //     for it, which renumbers it and makes masking idempotent (CON-002).
 //
-// The other kinds are tokWord, tokSpace (a run of white space) and tokPunct
-// (one byte that is none of the above).
+// The other kinds are tokWord, tokSpace (a run of white space), tokComment
+// (statement mode only, see below) and tokPunct (one byte that is none of the
+// above).
 //
 // A key=value pair is a tokWord followed by a tokPunct '='; the tokenizer
 // does not know where a value ends. A rule that needs a span the tokenizer
@@ -381,8 +471,9 @@ func PatternID(r *Record, template []byte) [8]byte {
 //
 // Statement mode (stmt) is for the SQL after a statement marker: it turns off
 // the spaced unit, so "SELECT 1 s" keeps the alias, and the LSN, so "c/2" is a
-// division. Comments ("--", "/* */") are not recognised yet; the statement
-// rules add them.
+// division. It adds tokComment: a "--" comment up to the next line break, or a
+// "/* */" comment, which nests as in PostgreSQL and runs to the end of the
+// input when unterminated. A rule treats a comment as white space.
 
 // tokKind is the class of one token.
 type tokKind uint8
@@ -397,6 +488,7 @@ const (
 	tokDollar
 	tokIdent
 	tokParam
+	tokComment
 )
 
 // token is the byte range s[start:end] of the tokenizer's input.
@@ -426,6 +518,13 @@ func (z *tokenizer) next() (token, bool) {
 		for end < len(s) && isTemplateSpace(s[end]) {
 			end++
 		}
+	case z.stmt && c == '-' && start+1 < len(s) && s[start+1] == '-':
+		kind, end = tokComment, start+2
+		for end < len(s) && s[end] != '\n' && s[end] != '\r' {
+			end++
+		}
+	case z.stmt && c == '/' && start+1 < len(s) && s[start+1] == '*':
+		kind, end = tokComment, scanBlockComment(s, start+2)
 	case c == '"':
 		kind, end = tokIdent, scanQuoted(s, start+1, '"', false)
 	case c == '\'':
@@ -610,6 +709,29 @@ func (z *tokenizer) scanDollar(start int) (tokKind, int) {
 		return tokDollar, open + k + len(tag)
 	}
 	return tokDollar, len(s)
+}
+
+// scanBlockComment returns the end of a "/* */" comment whose body starts at
+// i. Comments nest, so each "/*" needs its own "*/". An unterminated comment
+// runs to the end of s.
+func scanBlockComment(s []byte, i int) int {
+	depth := 1
+	for i+1 < len(s) {
+		switch {
+		case s[i] == '/' && s[i+1] == '*':
+			depth++
+			i += 2
+		case s[i] == '*' && s[i+1] == '/':
+			depth--
+			i += 2
+			if depth == 0 {
+				return i
+			}
+		default:
+			i++
+		}
+	}
+	return len(s)
 }
 
 // scanQuoted returns the end of a quoted token whose body starts at i: the
