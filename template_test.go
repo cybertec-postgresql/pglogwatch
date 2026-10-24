@@ -96,7 +96,6 @@ var templateGolden = []struct {
 		severity: SeverityLog,
 		message:  `duration: 12.345 ms  statement: SELECT * FROM t WHERE id = 42 AND name = 'x'`,
 		want:     `duration: $1 statement: SELECT * FROM t WHERE id = $2 AND name = $3`,
-		pending:  "US2/T008",
 	},
 	{
 		// Needs the prepared-statement name rule of T008 and the IN list
@@ -346,6 +345,57 @@ func TestAppendTemplatePaths(t *testing.T) {
 	}
 }
 
+// templateStatementCases holds the cases of TestAppendTemplateStatements.
+var templateStatementCases = []templateStateCase{
+	{"statement", "", "statement: SELECT * FROM t WHERE id = 42", "statement: SELECT * FROM t WHERE id = $1"},
+	{"duration and statement", "", "duration: 0.5 ms  statement: select 1", "duration: $1 statement: select $2"},
+	{"execute names a statement", "", "execute S_1: SELECT a FROM t WHERE b = $1",
+		"execute $1: SELECT a FROM t WHERE b = $2"},
+	{"execute the unnamed statement", "", "execute <unnamed>: SELECT 1", "execute $1: SELECT $2"},
+	{"execute fetch from a portal", "", "execute fetch from S_2/C_3: SELECT 1", "execute fetch from $1: SELECT $2"},
+	{"parse", "", "duration: 0.1 ms  parse S_3: INSERT INTO t VALUES ($1)",
+		"duration: $1 parse $2: INSERT INTO t VALUES ($3)"},
+	{"bind", "", "duration: 0.1 ms  bind <unnamed>: UPDATE t SET a = 'x'", "duration: $1 bind $2: UPDATE t SET a = $3"},
+	{"fastpath function call", "", `fastpath function call: "lo_open" (OID 952)`,
+		`fastpath function call: "lo_open" (OID $1)`},
+	{"line comment", "", "statement: SELECT 1 -- note 5\nFROM t", "statement: SELECT $1 FROM t"},
+	{"block comment", "", "statement: SELECT /* a /* nested */ 5 */ x FROM t", "statement: SELECT x FROM t"},
+	{"comment between tokens", "", "statement: SELECT a/**/FROM t", "statement: SELECT a FROM t"},
+	{"trailing comment", "", "statement: SELECT 1 -- done", "statement: SELECT $1"},
+	{"unterminated block comment", "", "statement: SELECT 1 /* 'SECRET-1'", "statement: SELECT $1"},
+	{"newlines and tabs", "", "statement: SELECT a,\n\tb\r\nFROM   t\n", "statement: SELECT a, b FROM t"},
+	{"e-mail address literal", "", "statement: SELECT id FROM users WHERE email = 'bob@example.com'",
+		"statement: SELECT id FROM users WHERE email = $1"},
+	{"keyword case stays", "", "statement: Select A From T", "statement: Select A From T"},
+	{"quoted identifier stays", "", `statement: SELECT "Name" FROM "T"`, `statement: SELECT "Name" FROM "T"`},
+	{"quoted identifier stays in class 23", "23505", `statement: INSERT INTO "users" VALUES (1)`,
+		`statement: INSERT INTO "users" VALUES ($1)`},
+	{"equals is not a key", "", "statement: SELECT * FROM t WHERE a=b", "statement: SELECT * FROM t WHERE a=b"},
+	{"id word is a column", "", "statement: SELECT pid FROM s WHERE relation = x1", "statement: SELECT pid FROM s WHERE relation = x1"},
+	{"slash is a division", "", "statement: SELECT a /b, c/2 FROM t", "statement: SELECT a /b, c/$1 FROM t"},
+	{"minus comment is not a sign", "", "statement: SELECT x --1\n", "statement: SELECT x"},
+	{"placeholders are renumbered", "", "statement: SELECT $3, $1", "statement: SELECT $1, $2"},
+	{"marker only at the start or after a duration", "", "could not parse error: 42", "could not parse error: $1"},
+	{"name with a space is not a marker", "", "bind message supplies 2 parameters", "bind message supplies $1 parameters"},
+	{"white space collapses in the message", "", "  wrote  3\tbuffers \n", "wrote $1 buffers"},
+	{"template is a fixed point", "", "$1 statement: SELECT $2", "$1 statement: SELECT $2"},
+	{"masked name survives", "", "duration: $1 execute $2: SELECT $3", "duration: $1 execute $2: SELECT $3"},
+}
+
+// TestAppendTemplateStatements checks REQ-009 without the list collapse: the
+// marker stays, the prepared statement name and the literals become
+// placeholders, comments go, white space collapses, and keywords and
+// identifiers stay as written.
+func TestAppendTemplateStatements(t *testing.T) {
+	for _, c := range templateStatementCases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &Record{SQLState: sqlState(t, c.state), Message: []byte(c.in)}
+			got := AppendTemplate([]byte("keep:"), r)
+			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
 // tok is a token as the tests write it: its kind and its text.
 type tok struct {
 	kind tokKind
@@ -430,6 +480,9 @@ func TestTokenizerValues(t *testing.T) {
 		{"unterminated double quote", `x "abc`, false, []tok{{tokIdent, `"abc`}}},
 		{"high bytes are word bytes", "größe 5 Größe5", false, []tok{{tokNumber, "5"}}},
 		{"dotted words", "t.id postgresql.conf pgsql_tmp1234.0", false, nil},
+		{"comments in statement mode", "a -- x 1\nb /* 1 /* 2 */ 3 */ c --1", true,
+			[]tok{{tokComment, "-- x 1"}, {tokComment, "/* 1 /* 2 */ 3 */"}, {tokComment, "--1"}}},
+		{"no comments in a message", "a -- b /* c */", false, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -452,7 +505,8 @@ func TestTokenizerKeyValue(t *testing.T) {
 // modes, cover the input exactly once and in order, so a rule that copies
 // every token it does not mask reproduces the rest of the message.
 func TestTokenizerTiles(t *testing.T) {
-	inputs := []string{"", " ", "'", `"`, "$", "-", ".", "0x", "1e", "1e+", "E'\\", "U&", "$a", "..0", "-..5"}
+	inputs := []string{"", " ", "'", `"`, "$", "-", ".", "0x", "1e", "1e+", "E'\\", "U&", "$a", "..0", "-..5",
+		"--", "/*", "/*/", "/* /* */", "-- a\r\nb"}
 	for _, c := range templateGolden {
 		inputs = append(inputs, c.message)
 	}
@@ -555,6 +609,9 @@ func templateInputs() []templateStateCase {
 	}
 	for _, c := range templateQuotedCases {
 		out = append(out, templateStateCase{"quoted/" + c.name, c.state, c.in, c.want})
+	}
+	for _, c := range templateStatementCases {
+		out = append(out, templateStateCase{"statement/" + c.name, c.state, c.in, c.want})
 	}
 	for _, c := range templateIdempotentCases {
 		out = append(out, templateStateCase{"idempotent/" + c.name, c.state, c.in, c.want})
