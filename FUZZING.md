@@ -7,14 +7,16 @@ repeat both.
 
 ## Targets
 
-Three targets in `fuzz_test.go`, chosen because each one parses attacker-shaped
-input into a fixed-size structure and each one has a different failure mode:
+Four targets in `fuzz_test.go`. The first three parse attacker-shaped input
+into a fixed-size structure, each with a different failure mode. The fourth
+masks a message into a template:
 
 | target | input | what a crash would mean |
 |---|---|---|
 | `FuzzParseRecord` | a whole log file, any format | the framing or a field scanner walked off a buffer |
 | `FuzzPrefixTemplate` | a `log_line_prefix` plus a line | the prefix compiler accepted a template it cannot match |
 | `FuzzUnquote` | one quoted field | `AppendUnquoted` mis-sized its output |
+| `FuzzAppendTemplate` | a message, a SQLSTATE class and a severity | `AppendTemplate` read past the message, cut the template badly or gave a template that masks to something else |
 
 Each target asserts more than "did not panic", because a parser that silently
 dropped every record would pass that bar:
@@ -31,6 +33,13 @@ dropped every record would pass that bar:
 - `FuzzUnquote` requires the unquoted result never to exceed the input, since
   no escape expands, and requires appending never to disturb bytes already in
   the destination.
+- `FuzzAppendTemplate` requires the template to be at most 1,024 bytes plus
+  the ellipsis, appending never to disturb bytes already in the destination,
+  masking the template again to return it unchanged (AC-005, AC-006 of
+  `spec/message-template.md`), and `PatternID` to give the same id twice. It
+  picks the SQLSTATE from none, class 22, class 23 and 42P01, since the class
+  decides how double-quoted tokens are masked, and seeds from the template
+  tests and the privacy corpus.
 
 ## The VAL-005 run
 
@@ -48,7 +57,8 @@ dropped every record would pass that bar:
 | `FuzzUnquote` | 10 000 020 | 0 | 13 |
 | **total** | **30 000 020** | **0** | **550** |
 
-Three times VAL-005's floor, with nothing found. The count is exact rather than
+Three times VAL-005's floor, with nothing found. `FuzzAppendTemplate` came
+later and is not part of this run. The count is exact rather than
 "about 10 million" because `-fuzztime` accepts an execution count with an `x`
 suffix, which is the form worth using for a threshold stated in executions: a
 wall-clock budget measures the machine, not the requirement.
@@ -75,13 +85,16 @@ machine -- is the part a release needs.
 writes there is a *crasher*, an input that just failed, and a failing run must
 not leave a staged file behind for somebody to commit without reading it. A
 crasher should be read, minimised, and added to `fuzz_test.go` as a named seed
-recording the bug it found.
+recording the bug it found. For `FuzzAppendTemplate` the named seed is a row
+in the case tables of `template_test.go`: `templateInputs` feeds every row to
+the target as a seed, and the unit tests pin its template too.
 
 ## Repeating it
 
 ```bash
-# The VAL-005 run: exact execution counts, roughly five minutes in total.
-for t in FuzzParseRecord FuzzPrefixTemplate FuzzUnquote; do
+# The VAL-005 run plus FuzzAppendTemplate: exact execution counts, roughly
+# fifteen minutes in total.
+for t in FuzzParseRecord FuzzPrefixTemplate FuzzUnquote FuzzAppendTemplate; do
   go test -run '^$' -fuzz "$t" -fuzztime 10000000x .
 done
 ```

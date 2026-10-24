@@ -167,3 +167,63 @@ func FuzzUnquote(f *testing.F) {
 		}
 	})
 }
+
+// fuzzTemplateStates are the SQLSTATE values FuzzAppendTemplate picks from:
+// none, class 22, class 23, and another class. The class decides how
+// double-quoted tokens are masked (REQ-005), so these four cover every path.
+var fuzzTemplateStates = [...][5]byte{{}, [5]byte([]byte("22P02")), [5]byte([]byte("23505")), [5]byte([]byte("42P01"))}
+
+// fuzzTemplateState returns the index into fuzzTemplateStates of the class
+// of a SQLSTATE written as text, for seeding.
+func fuzzTemplateState(code string) uint8 {
+	switch {
+	case code == "":
+		return 0
+	case strings.HasPrefix(code, "22"):
+		return 1
+	case strings.HasPrefix(code, "23"):
+		return 2
+	}
+	return 3
+}
+
+// FuzzAppendTemplate drives AppendTemplate and PatternID over arbitrary
+// messages (AC-006). It checks that the template stays within 1,024 bytes
+// plus the ellipsis, that bytes already in dst are kept, that masking a
+// template again returns it unchanged (AC-005, CON-002), and that PatternID
+// gives the same id twice.
+func FuzzAppendTemplate(f *testing.F) {
+	for _, c := range templateGolden {
+		f.Add([]byte(c.message), fuzzTemplateState(c.sqlState), uint8(c.severity))
+	}
+	for _, c := range templateInputs() {
+		f.Add([]byte(c.in), fuzzTemplateState(c.state), uint8(SeverityError))
+	}
+	for _, c := range loadTemplateCorpus(f) {
+		f.Add([]byte(c.message), fuzzTemplateState(c.state), uint8(c.severity))
+	}
+
+	f.Fuzz(func(t *testing.T, msg []byte, state, severity uint8) {
+		r := &Record{
+			Severity: Severity(severity % uint8(SeverityPanic+1)),
+			SQLState: fuzzTemplateStates[state%uint8(len(fuzzTemplateStates))],
+			Message:  msg,
+		}
+		const prefix = "keep me"
+		dst := AppendTemplate([]byte(prefix), r)
+		if string(dst[:len(prefix)]) != prefix {
+			t.Fatalf("AppendTemplate changed the bytes already in dst: %q", dst[:len(prefix)])
+		}
+		tmpl := dst[len(prefix):]
+		if len(tmpl) > templateLimit+len(ellipsis) {
+			t.Fatalf("template is %d bytes, over %d: %q", len(tmpl), templateLimit+len(ellipsis), tmpl)
+		}
+		again := AppendTemplate(nil, &Record{Severity: r.Severity, SQLState: r.SQLState, Message: tmpl})
+		if !bytes.Equal(again, tmpl) {
+			t.Fatalf("not idempotent:\nmessage  %q\ntemplate %q\nagain    %q", msg, tmpl, again)
+		}
+		if a, b := PatternID(r, tmpl), PatternID(r, bytes.Clone(tmpl)); a != b {
+			t.Fatalf("PatternID differs for the same template: %x and %x", a, b)
+		}
+	})
+}
