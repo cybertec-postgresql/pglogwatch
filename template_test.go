@@ -3,6 +3,9 @@ package pglogwatch
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -197,6 +200,8 @@ var templateLiteralCases = []templateCase{
 	{"empty dollar tag", "body $$it's$$ rejected", "body $1 rejected"},
 	{"apostrophe in a word stays", "can't open 3 files", "can't open $1 files"},
 	{"numbering runs left to right", "1 and 'a' and 0x2 and $t$b$t$", "$1 and $2 and $3 and $4"},
+	{"digit separators", "limit 1_000_000 rows", "limit $1 rows"},
+	{"octal and binary", "flags 0o17 and 0b101", "flags $1 and $2"},
 }
 
 // TestAppendTemplateLiterals checks the literal rules of T004 one by one:
@@ -292,6 +297,22 @@ var templateQuotedCases = []templateStateCase{
 		`password authentication failed for user "bob"`},
 	{"punctuation drops the for phrase", "28000", `no entry for host "h", user "bob": x "y"`,
 		`no entry for host "h", user "bob": x "y"`},
+	{"quoted WAL file name", "", `restored log file "000000010000000000000042" from archive`,
+		`restored log file $1 from archive`},
+	{"quoted setting value", "", `parameter "work_mem" changed to "64MB"`, `parameter "work_mem" changed to $1`},
+	{"quoted address", "", `listening on IPv6 address "::1", port 5432`, `listening on IPv6 address $1, port $2`},
+	{"literal near a syntax error", "42601", `syntax error at or near "'abc'"`, `syntax error at or near $1`},
+	{"prefixed literal near a syntax error", "42601", `syntax error at or near "E'abc'"`, `syntax error at or near $1`},
+	{"number near a syntax error", "42601", `syntax error at or near "42"`, `syntax error at or near $1`},
+	{"dollar quote near a syntax error", "42601", `unterminated dollar-quoted string at or near "$$abc"`,
+		`unterminated dollar-quoted string at or near $1`},
+	{"keyword near a syntax error stays", "42601", `syntax error at or near "FROM"`, `syntax error at or near "FROM"`},
+	{"German quotes in class 22", "22P02", `ungültige Eingabesyntax für Typ integer: »abc«`,
+		`ungültige Eingabesyntax für Typ integer: $1`},
+	{"French quotes in class 23", "23505", "la valeur d'une clé dupliquée rompt la contrainte unique « users_pkey »",
+		"la valeur d'une clé dupliquée rompt la contrainte unique $1"},
+	{"German quoted identifier stays", "42P01", `Relation »orders« existiert nicht`, `Relation »orders« existiert nicht`},
+	{"German quoted path", "58P01", `konnte Datei »base/1/2« nicht öffnen`, `konnte Datei $1 nicht öffnen`},
 }
 
 // TestAppendTemplateQuoted checks REQ-005: a double-quoted token is an
@@ -366,6 +387,10 @@ var templateStatementCases = []templateStateCase{
 	{"newlines and tabs", "", "statement: SELECT a,\n\tb\r\nFROM   t\n", "statement: SELECT a, b FROM t"},
 	{"e-mail address literal", "", "statement: SELECT id FROM users WHERE email = 'bob@example.com'",
 		"statement: SELECT id FROM users WHERE email = $1"},
+	{"typed literal right after its type", "", "statement: SELECT * FROM t WHERE d = date'2026-01-01'",
+		"statement: SELECT * FROM t WHERE d = $1"},
+	{"literal right after a keyword", "", "statement: SELECT'x'", "statement: $1"},
+	{"digit separators in a statement", "", "statement: SELECT 1_000, 0x1F_FF", "statement: SELECT $1, $2"},
 	{"keyword case stays", "", "statement: Select A From T", "statement: Select A From T"},
 	{"quoted identifier stays", "", `statement: SELECT "Name" FROM "T"`, `statement: SELECT "Name" FROM "T"`},
 	{"quoted identifier stays in class 23", "23505", `statement: INSERT INTO "users" VALUES (1)`,
@@ -604,6 +629,8 @@ func TestTokenizerValues(t *testing.T) {
 			[]tok{{tokNumber, "1"}, {tokNumber, "-1"}, {tokNumber, "1"}}},
 		{"version string", "16.4.1", false, []tok{{tokNumber, "16.4"}, {tokNumber, "1"}}},
 		{"hex", "0x1F 0Xff 0x1g", false, []tok{{tokHex, "0x1F"}, {tokHex, "0Xff"}}},
+		{"digit separators and radix prefixes", "1_000 0o17 0b101 1__0 0b2 1_", false,
+			[]tok{{tokNumber, "1_000"}, {tokHex, "0o17"}, {tokHex, "0b101"}}},
 		{"lsn", "lsn=0/3000060, redo lsn=A/16B3748.", false,
 			[]tok{{tokHex, "0/3000060"}, {tokHex, "A/16B3748"}}},
 		{"lsn-shaped path prefix is not an lsn", "0/16B3748/x", false, []tok{{tokNumber, "0"}}},
@@ -625,6 +652,10 @@ func TestTokenizerValues(t *testing.T) {
 		{"double quotes", `relation "orders_2026" and "a""b" and U&"d"`, false,
 			[]tok{{tokIdent, `"orders_2026"`}, {tokIdent, `"a""b"`}, {tokIdent, `U&"d"`}}},
 		{"unterminated double quote", `x "abc`, false, []tok{{tokIdent, `"abc`}}},
+		{"guillemets", "»a b« « c » »d", false,
+			[]tok{{tokIdent, "»a b«"}, {tokIdent, "« c »"}, {tokIdent, "»d"}}},
+		{"quote after a word starts a literal in a statement", "date'2026-01-01'", true,
+			[]tok{{tokString, "'2026-01-01'"}}},
 		{"high bytes are word bytes", "größe 5 Größe5", false, []tok{{tokNumber, "5"}}},
 		{"dotted words", "t.id postgresql.conf pgsql_tmp1234.0", false, nil},
 		{"comments in statement mode", "a -- x 1\nb /* 1 /* 2 */ 3 */ c --1", true,
@@ -899,4 +930,127 @@ func TestSameShapeSameID(t *testing.T) {
 	t.Run("different template", func(t *testing.T) {
 		assert.NotEqual(t, id, PatternID(base, []byte(`relation $1 does not exist`)))
 	})
+}
+
+// templateCorpusPath is the privacy corpus of AC-002. Its format is described
+// in testdata/template/README.md.
+const templateCorpusPath = "testdata/template/privacy.txt"
+
+// corpusRecord is one record of the privacy corpus. line is its line number
+// in the file, for failure messages.
+type corpusRecord struct {
+	line     int
+	severity Severity
+	state    string
+	message  string
+}
+
+// loadTemplateCorpus reads the privacy corpus and fails the test on a line
+// that does not follow the format.
+func loadTemplateCorpus(t testing.TB) []corpusRecord {
+	t.Helper()
+	data, err := os.ReadFile(templateCorpusPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	severities := make(map[string]Severity)
+	for s := SeverityDebug5; s <= SeverityPanic; s++ {
+		severities[s.String()] = s
+	}
+	var out []corpusRecord
+	for i, line := range strings.Split(string(data), "\n") {
+		n := i + 1
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		fields := strings.SplitN(line, " ", 3)
+		if len(fields) != 3 {
+			t.Fatalf("%s:%d: want SEVERITY SQLSTATE message", templateCorpusPath, n)
+		}
+		sev, ok := severities[fields[0]]
+		if !ok {
+			t.Fatalf("%s:%d: unknown severity %q", templateCorpusPath, n, fields[0])
+		}
+		state := fields[1]
+		if state == "-" {
+			state = ""
+		} else if len(state) != 5 {
+			t.Fatalf("%s:%d: SQLSTATE %q is not five characters", templateCorpusPath, n, state)
+		}
+		msg, err := unescapeCorpus(fields[2])
+		if err != nil {
+			t.Fatalf("%s:%d: %v", templateCorpusPath, n, err)
+		}
+		msg = strings.ReplaceAll(msg, "{email}", templateCorpusEmail)
+		out = append(out, corpusRecord{line: n, severity: sev, state: state, message: msg})
+	}
+	return out
+}
+
+// unescapeCorpus turns the \n, \t and \\ escapes of a corpus message into the
+// bytes they stand for.
+func unescapeCorpus(s string) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		if i == len(s) {
+			return "", errors.New("backslash at the end of the line")
+		}
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case '\\':
+			b.WriteByte('\\')
+		default:
+			return "", fmt.Errorf("unknown escape \\%c", s[i])
+		}
+	}
+	return b.String(), nil
+}
+
+// templateCorpusEmail is the e-mail marker that {email} in the corpus stands
+// for. It lives here because TestFixturesCarryNoRealIdentifiers rejects an
+// e-mail address written into a fixture.
+const templateCorpusEmail = "secret4@example.com"
+
+// templateMarkers are the values seeded into the privacy corpus. None of them
+// may appear in a template. "SECRET" also catches a value masked only in
+// part, such as "SECRET-1" written back as "SECRET-$1", and "secret4" a
+// local part left behind by a masked domain.
+var templateMarkers = []string{"SECRET", "SECRET-1", "424242", "SECRET-2", "SECRET-3", templateCorpusEmail, "secret4"}
+
+// TestTemplatePrivacy checks AC-002: no marker seeded into the privacy corpus
+// survives in its template. It also checks CON-002 over the corpus: masking
+// a template again changes nothing.
+func TestTemplatePrivacy(t *testing.T) {
+	corpus := loadTemplateCorpus(t)
+	if len(corpus) < 200 {
+		t.Fatalf("the corpus has %d records, AC-002 asks for at least 200", len(corpus))
+	}
+	for _, c := range corpus {
+		r := &Record{Severity: c.severity, SQLState: sqlState(t, c.state), Message: []byte(c.message)}
+		tmpl := AppendTemplate(nil, r)
+		seeded := false
+		for _, m := range templateMarkers {
+			if strings.Contains(c.message, m) {
+				seeded = true
+			}
+			if strings.Contains(string(tmpl), m) {
+				t.Errorf("%s:%d: %q survives in %q", templateCorpusPath, c.line, m, tmpl)
+			}
+		}
+		if !seeded {
+			t.Errorf("%s:%d: the message carries no marker", templateCorpusPath, c.line)
+		}
+		again := AppendTemplate(nil, &Record{Severity: c.severity, SQLState: r.SQLState, Message: tmpl})
+		if string(again) != string(tmpl) {
+			t.Errorf("%s:%d: template %q masks again to %q", templateCorpusPath, c.line, tmpl, again)
+		}
+	}
 }

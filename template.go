@@ -200,11 +200,11 @@ scan:
 			// and the LSN-shaped virtual transaction id "3/1234" are already
 			// literals. In a statement a word is a keyword or an identifier.
 			mask()
-		case !z.stmt && t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(tb)):
+		case !z.stmt && t.kind == tokIdent && (quotedData || after == forData || isQuotedValue(tb)):
 			// REQ-005 and REQ-007: a double-quoted token is an identifier
-			// and stays, unless it holds data or a path. In a statement it is
-			// always an identifier, whatever the SQLSTATE class, so it stays
-			// (REQ-009).
+			// and stays, unless it holds data, a path or a literal. In a
+			// statement it is always an identifier, whatever the SQLSTATE
+			// class, so it stays (REQ-009).
 			mask()
 		case glued && t.kind == tokWord && isDigit(tb[0]):
 			// The placeholder before this word takes it; see glued.
@@ -558,13 +558,58 @@ func pathLen(s []byte) int {
 	return len(s)
 }
 
-// isQuotedPath reports whether the double-quoted token b, "x" or U&"x",
-// holds a file path (REQ-007), as in path "base/pgsql_tmp/pgsql_tmp1234.0".
-func isQuotedPath(b []byte) bool {
-	if b[0] != '"' {
-		b = b[2:] // U&
+// isQuotedValue reports whether the quoted token b holds a value rather than
+// an identifier, in any SQLSTATE class. A file path is a value (REQ-007), as
+// in path "base/pgsql_tmp/pgsql_tmp1234.0". By GUD-001 so is a body that
+// starts with a digit, a sign, a dot, a colon, a dollar sign or a single
+// quote, or that holds a single quote anywhere.
+// An identifier rarely looks like that, while these do:
+//
+//	restored log file "000000010000000000000042" from archive
+//	parameter "work_mem" changed to "64MB"
+//	listening on IPv6 address "::1", port 5432
+//	syntax error at or near "'secret'"
+//	unterminated dollar-quoted string at or near "$$secret"
+func isQuotedValue(b []byte) bool {
+	body := quotedBody(b)
+	if len(body) == 0 {
+		return false
 	}
-	return pathPrefix(b[1:])
+	if pathPrefix(body) || bytes.IndexByte(body, '\'') >= 0 {
+		return true
+	}
+	switch c := body[0]; {
+	case isDigit(c), c == '+', c == '-', c == '.', c == ':', c == '$':
+		return true
+	}
+	return false
+}
+
+// quotedBody returns the quoted token b without its opening mark: "x",
+// U&"x", »x« or «x». The closing mark stays, since pathPrefix and the
+// checks of isQuotedValue only look at the start. Guillemets usually enclose
+// a no-break space in French ("« x »"); the spaces after the opening mark
+// are skipped too.
+func quotedBody(b []byte) []byte {
+	switch b[0] {
+	case '"':
+		return b[1:]
+	case 0xC2:
+		b = b[2:]
+		for {
+			switch {
+			case len(b) > 0 && b[0] == ' ':
+				b = b[1:]
+			case len(b) > 1 && b[0] == 0xC2 && b[1] == 0xA0: // U+00A0
+				b = b[2:]
+			case len(b) > 2 && b[0] == 0xE2 && b[1] == 0x80 && b[2] == 0xAF: // U+202F
+				b = b[3:]
+			default:
+				return b
+			}
+		}
+	}
+	return b[3:] // U&"
 }
 
 // skipValue moves pos past the value of a key=value pair that starts at pos.
@@ -729,7 +774,8 @@ func patternHead(dst []byte, r *Record) []byte {
 //
 // The kinds a rule will mask are:
 //   - tokNumber: a decimal integer, decimal or scientific number with an
-//     optional sign and an optional unit (see isUnit). The unit is attached
+//     optional sign and an optional unit (see isUnit). A '_' between two
+//     digits is part of the number, as in "1_000_000". The unit is attached
 //     ("76kB", "0.8%") or, outside statement mode, separated by one space
 //     ("12.345 ms", "16384 kB"); the token covers number and unit. A sign
 //     belongs to the number only when the byte before it (in statement mode,
@@ -737,16 +783,20 @@ func patternHead(dst []byte, r *Record) []byte {
 //     a quote, so "a-1" is "a", "-", "1" in both modes, and "a -1" is a
 //     signed number in a message but a subtraction in a statement.
 //     A number followed by word bytes that are not a unit is a word ("1abc").
-//   - tokHex: "0x1F", and outside statement mode an LSN "0/16B3748". An LSN
+//   - tokHex: "0x1F", the octal "0o17" and binary "0b101" integers, and
+//     outside statement mode an LSN "0/16B3748". An LSN
 //     followed by '/' is left alone so the path rule can take it.
 //   - tokString: a single-quoted literal with its prefix: 'x', E'x' (backslash
-//     escapes), U&'x', B'x', X'x', N'x'. A doubled quote does not end it. A
-//     quote right after a word byte is punctuation, so "can't" is not a
-//     literal. An unterminated literal runs to the end of the input.
+//     escapes), U&'x', B'x', X'x', N'x'. A doubled quote does not end it. In
+//     a message a quote right after a word byte is punctuation, so "can't"
+//     is not a literal; in a statement it starts a literal, as in
+//     date'2026-01-01'. An unterminated literal runs to the end of the input.
 //   - tokDollar: a dollar-quoted literal $tag$...$tag$ (the tag may be empty),
 //     running to the end of the input when unterminated.
-//   - tokIdent: a double-quoted token, "x" or U&"x", with doubled quotes. Class
-//     22 and 23 rules and the path rule decide whether it stays.
+//   - tokIdent: a double-quoted token, "x" or U&"x", with doubled quotes, or
+//     a token in guillemets, »x« or «x», which translations write instead of
+//     double quotes. Class 22 and 23 rules and isQuotedValue decide whether
+//     it stays.
 //   - tokParam: an existing $n placeholder. A rule writes a fresh placeholder
 //     for it, which renumbers it and makes masking idempotent (CON-002).
 //
@@ -817,7 +867,10 @@ func (z *tokenizer) next() (token, bool) {
 	case c == '"':
 		kind, end = tokIdent, scanQuoted(s, start+1, '"', false)
 	case c == '\'':
-		if start == 0 || !isWordByte(s[start-1]) {
+		// In a message a quote after a word byte is an apostrophe ("can't").
+		// SQL has no apostrophes, so in a statement it always starts a
+		// literal, as in the typed literal date'2026-01-01'.
+		if z.stmt || start == 0 || !isWordByte(s[start-1]) {
 			kind, end = tokString, scanQuoted(s, start+1, '\'', false)
 		}
 	case c == '$':
@@ -826,6 +879,8 @@ func (z *tokenizer) next() (token, bool) {
 		c == '.' && start+1 < len(s) && isDigit(s[start+1]) && (start == 0 || !isWordByte(s[start-1])),
 		(c == '+' || c == '-') && z.numberAt(start+1) && z.signAllowed(start):
 		kind, end = z.scanNumeric(start)
+	case c == 0xC2 && start+1 < len(s) && (s[start+1] == 0xBB || s[start+1] == 0xAB):
+		kind, end = tokIdent, scanGuillemets(s, start)
 	case isWordByte(c):
 		kind, end = z.scanWordish(start)
 	}
@@ -876,11 +931,8 @@ func (z *tokenizer) scanNumeric(start int) (tokKind, int) {
 		i++
 	}
 	if !signed {
-		if i+2 < len(s) && s[i] == '0' && (s[i+1] == 'x' || s[i+1] == 'X') && isHexDigit(s[i+2]) {
-			j := i + 3
-			for j < len(s) && isHexDigit(s[j]) {
-				j++
-			}
+		if digit := radixDigit(s, i); digit != nil {
+			j := scanDigits(s, i+2, digit)
 			if !continuesWord(s, j) {
 				return tokHex, j
 			}
@@ -892,14 +944,9 @@ func (z *tokenizer) scanNumeric(start int) (tokKind, int) {
 			}
 		}
 	}
-	for i < len(s) && isDigit(s[i]) {
-		i++
-	}
+	i = scanDigits(s, i, isDigit)
 	if i+1 < len(s) && s[i] == '.' && isDigit(s[i+1]) {
-		i += 2
-		for i < len(s) && isDigit(s[i]) {
-			i++
-		}
+		i = scanDigits(s, i+1, isDigit)
 	}
 	if i+1 < len(s) && (s[i] == 'e' || s[i] == 'E') {
 		j := i + 1
@@ -907,10 +954,7 @@ func (z *tokenizer) scanNumeric(start int) (tokKind, int) {
 			j++
 		}
 		if j < len(s) && isDigit(s[j]) {
-			for j < len(s) && isDigit(s[j]) {
-				j++
-			}
-			i = j
+			i = scanDigits(s, j, isDigit)
 		}
 	}
 	switch {
@@ -938,6 +982,64 @@ func (z *tokenizer) scanNumeric(start int) (tokKind, int) {
 		}
 	}
 	return tokNumber, i
+}
+
+// scanDigits returns the end of the run of digits that starts at i. A '_'
+// between two digits belongs to the run, as PostgreSQL 16 allows in numeric
+// literals ("1_000_000"), so the whole number is one token.
+func scanDigits(s []byte, i int, digit func(byte) bool) int {
+	for i < len(s) {
+		switch {
+		case digit(s[i]):
+			i++
+		case s[i] == '_' && i > 0 && digit(s[i-1]) && i+1 < len(s) && digit(s[i+1]):
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+// radixDigit returns the digit test of the non-decimal integer that starts
+// at i: "0x" hexadecimal, "0o" octal or "0b" binary, followed by at least one
+// digit. It returns nil when there is none.
+func radixDigit(s []byte, i int) func(byte) bool {
+	if i+2 >= len(s) || s[i] != '0' {
+		return nil
+	}
+	var digit func(byte) bool
+	switch s[i+1] {
+	case 'x', 'X':
+		digit = isHexDigit
+	case 'o', 'O':
+		digit = func(c byte) bool { return c >= '0' && c <= '7' }
+	case 'b', 'B':
+		digit = func(c byte) bool { return c == '0' || c == '1' }
+	default:
+		return nil
+	}
+	if !digit(s[i+2]) {
+		return nil
+	}
+	return digit
+}
+
+// scanGuillemets returns the end of a token quoted with guillemets, which
+// starts at i with "»" or "«". Translations write them where English writes
+// '"': German as »x«, French and Russian as «x». The closing mark is the
+// mirror of the opening one; without it the token runs to the end of s.
+func scanGuillemets(s []byte, i int) int {
+	closing := byte(0xAB) // second byte of «
+	if s[i+1] == 0xAB {
+		closing = 0xBB // second byte of »
+	}
+	for k := i + 2; k+1 < len(s); k++ {
+		if s[k] == 0xC2 && s[k+1] == closing {
+			return k + 2
+		}
+	}
+	return len(s)
 }
 
 // scanWordish scans a token that starts with a word byte: a prefixed string

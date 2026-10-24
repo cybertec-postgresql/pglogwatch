@@ -1,0 +1,359 @@
+# Privacy corpus for TestTemplatePrivacy (AC-002). See README.md for the format.
+# Every record carries at least one marker: 'SECRET-1', 424242, user=SECRET-2,
+# "SECRET-3" (classes 22 and 23, and after a "for type" phrase), or an e-mail
+# address in a statement, written {email}.
+
+# Connections and authentication
+LOG - connection received: host=192.168.42.42 port=424242
+LOG - connection received: host=SECRET-2.example.test port=424242
+LOG - connection received: host=[local] port=424242
+LOG - connection authorized: user=SECRET-2 database=shop
+LOG - connection authorized: user=SECRET-2 database=shop application_name=psql
+LOG - connection authorized: user=SECRET-2 database=shop SSL enabled (protocol=TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, bits=256)
+LOG - connection authorized: user=SECRET-2 database=shop application_name="SECRET-1 app"
+LOG - connection authenticated: identity="SECRET-2" method=scram-sha-256 (/etc/postgresql/16/main/pg_hba.conf:424242)
+LOG - connection authenticated: user=SECRET-2 method=trust (/etc/postgresql/16/main/pg_hba.conf:42)
+LOG - replication connection authorized: user=SECRET-2 application_name=walreceiver
+LOG - replication connection authorized: user=SECRET-2 SSL enabled (protocol=TLSv1.3, cipher=TLS_AES_128_GCM_SHA256, bits=128)
+LOG - disconnection: session time: 0:00:01.234 user=SECRET-2 database=shop host=10.0.0.5 port=424242
+LOG - disconnection: session time: 424242:42:42.424 user=SECRET-2 database=SECRET-2 host=[local]
+LOG - connection authorized: user=SECRET-2 database=postgres application_name=pg_dump
+FATAL 53300 too many connections for role "app" (limit 424242)
+FATAL 57P03 the database system is starting up (pid 424242)
+FATAL 08P01 invalid length of startup packet 424242
+LOG 08P01 incomplete startup packet of 424242 bytes
+LOG - could not accept SSL connection: unexpected eof while reading, peer 10.0.0.5:424242
+LOG - Verbindung autorisiert: Benutzer=SECRET-2 Datenbank=shop
+LOG - connexion autorisée : utilisateur=SECRET-2 base de données=shop
+LOG - connection authorized: user=SECRET-2 database=shop application_name=
+LOG - connection authorized: user=SECRET-2, database=shop
+LOG - connection received: host=2001:db8::424242 port=424242
+
+# Server start, stop and recovery
+LOG - starting PostgreSQL 16.4 on x86_64-pc-linux-gnu, compiled by gcc 12.2.0, 424242-bit
+LOG - listening on IPv4 address "0.0.0.0", port 424242
+LOG - listening on IPv6 address "::1", port 424242
+LOG - listening on Unix socket "/var/run/postgresql/.s.PGSQL.424242"
+LOG - listening on Unix socket "/tmp/SECRET-1/.s.PGSQL.5432"
+LOG - database system was shut down at 2026-10-24 12:42:42.424242 UTC
+LOG - database system was interrupted; last known up at 2026-10-24 04:24:24 UTC, pid 424242
+LOG - database system was not properly shut down; automatic recovery in progress after 424242 s
+LOG - redo starts at 0/424242
+LOG - redo done at 4/24242424 system usage: CPU: user: 0.42 s, system: 0.04 s, elapsed: 424242.42 s
+LOG - redo in progress, elapsed time: 424242.42 s, current LSN: 42/424242
+LOG - consistent recovery state reached at 0/424242
+LOG - invalid record length at 0/424242: expected at least 24, got 0
+LOG - invalid magic number 0000 in WAL segment 000000010000000000000042, LSN 0/424242, offset 4243456
+LOG - restored log file "000000010000000000424242" from archive
+LOG - restored log file "00000002.history" from archive, size 424242
+LOG - started streaming WAL from primary at 0/424242 on timeline 1
+LOG - replication terminated by primary server at 0/424242
+LOG - selected new timeline ID: 424242
+LOG - archive recovery complete at 0x424242
+LOG - recovery stopping before commit of transaction 424242, time 2026-10-24 12:00:00+00
+LOG - recovery restart point at 0/424242
+LOG - received fast shutdown request from pid 424242
+LOG - background worker "logical replication launcher" (PID 424242) exited with exit code 1
+LOG - server process (PID 424242) was terminated by signal 9: Killed
+LOG - server process (PID 424242) exited with exit code 424242
+LOG - terminating any other active server processes after pid 424242
+LOG - all server processes terminated; reinitializing at 0/424242
+LOG - shutting down 424242
+LOG - database system is shut down after 424242 ms
+PANIC XX000 could not locate a valid checkpoint record at 0/424242
+PANIC 58P01 could not open file "pg_wal/000000010000000000424242": No such file or directory
+PANIC 53100 could not write to file "pg_wal/xlogtemp.424242": No space left on device
+PANIC XX000 WAL contains references to invalid pages at 0/424242
+LOG - checkpointer process (PID 424242) was terminated by signal 6: Aborted
+LOG - received SIGHUP, reloading configuration files at 0/424242
+LOG - parameter "work_mem" changed to "424242kB"
+LOG - parameter "log_min_duration_statement" changed to "424242"
+LOG - configuration file "/etc/postgresql/SECRET-1/postgresql.conf" contains errors; unaffected changes were applied
+LOG - parameter "shared_buffers" cannot be changed without restarting the server (value 424242)
+LOG 22023 invalid value for parameter "work_mem": "SECRET-3"
+LOG 22023 parameter "max_connections" requires a numeric value: "SECRET-3"
+
+# Checkpoints, WAL and archiving
+LOG - checkpoint starting: time 424242
+LOG - checkpoint starting: immediate force wait xlog 424242
+LOG - checkpoint complete: wrote 424242 buffers (42.4%); 0 WAL file(s) added, 0 removed, 3 recycled; write=424.242 s, sync=0.004 s, total=424.250 s; sync files=42, longest=0.002 s, average=0.001 s; distance=424242 kB, estimate=424242 kB; lsn=0/424242, redo lsn=0/424240
+LOG - restartpoint complete: wrote 424242 buffers (0.1%); 0 WAL file(s) added, 1 removed, 0 recycled; write=0.042 s, sync=0.001 s, total=0.050 s; sync files=4, longest=0.001 s, average=0.001 s; distance=424242 kB, estimate=424242 kB; lsn=4/2424242, redo lsn=4/2424240
+LOG - checkpoints are occurring too frequently (424242 seconds apart)
+LOG - checkpoint complete: wrote 42 buffers (0.0%), wrote 424242 SLRU buffers
+LOG - archive command failed with exit code 424242
+LOG - The failed archive command was: cp pg_wal/000000010000000000000042 /mnt/SECRET-1/archive/000000010000000000000042
+WARNING 01000 archiving write-ahead log file "000000010000000000424242" failed too many times, will try again later
+LOG - archiver process (PID 424242) exited with exit code 1
+WARNING 01000 could not remove file "pg_wal/000000010000000000424242": Permission denied
+LOG - recycled write-ahead log file "000000010000000000424242"
+LOG - removing write-ahead log file "000000010000000000424242"
+LOG - WAL writer process (PID 424242) exited with exit code 1
+WARNING 01000 max_wal_size of 424242 MB is too small
+LOG - logical decoding found consistent point at 0/424242
+LOG - starting logical decoding for slot "sub1", streaming transactions committing after 0/424242, reading WAL from 0/424240
+LOG - invalidating obsolete replication slot "standby1" after 424242 bytes
+LOG - terminating process 424242 to release replication slot "standby1"
+
+# Autovacuum, analyze and temporary files
+LOG - automatic vacuum of table "shop.public.orders": index scans: 1\npages: 0 removed, 424242 remain, 0 skipped due to pins, 0 skipped frozen\ntuples: 424242 removed, 424242 remain, 0 are dead but not yet removable, oldest xmin: 424242\navg read rate: 4.242 MB/s, avg write rate: 0.000 MB/s\nbuffer usage: 424242 hits, 0 misses, 0 dirtied\nWAL usage: 424242 records, 0 full page images, 424242 bytes\nsystem usage: CPU: user: 0.42 s, system: 0.00 s, elapsed: 4.24 s
+LOG - automatic analyze of table "shop.public.orders"\navg read rate: 424.242 MB/s, avg write rate: 0.000 MB/s\nbuffer usage: 424242 hits, 0 misses, 0 dirtied\nsystem usage: CPU: user: 0.04 s, system: 0.00 s, elapsed: 0.42 s
+LOG - automatic aggressive vacuum to prevent wraparound of table "shop.public.events": index scans: 0\npages: 0 removed, 424242 remain, 424242 scanned (100.00% of total)\nnew relfrozenxid: 424242, which is 42 XIDs ahead of previous value
+LOG - automatic vacuum of table "shop.pg_toast.pg_toast_16384": index scans: 1\nremovable cutoff: 424242, which was 42 XIDs old when operation ended\nindex "pg_toast_16384_index": pages: 424242 in total, 0 newly deleted, 0 currently deleted, 0 reusable
+LOG - skipping vacuum of "orders" --- lock not available after 424242 ms
+LOG - canceling autovacuum task for pid 424242
+LOG - sending cancel to blocking autovacuum PID 424242
+WARNING 01000 database "shop" must be vacuumed within 424242 transactions
+WARNING 01000 oldest xmin is far in the past, by 424242 transactions
+ERROR 54000 database is not accepting commands that assign new transaction IDs to avoid wraparound data loss in database "shop" after 424242
+LOG - temporary file: path "base/pgsql_tmp/pgsql_tmp424242.0", size 424242
+LOG - temporary file: path "base/pgsql_tmp/pgsql_tmp42.424242", size 1048576
+LOG - temporary file: path "pg_tblspc/16385/PG_16_202307071/pgsql_tmp/pgsql_tmp424242.7", size 424242
+LOG - temporary file: path "base/pgsql_tmp/pgsql_tmp424242.0.fileset/i42of424242.p0.0", size 4242
+ERROR 53100 could not write to file "base/pgsql_tmp/pgsql_tmp424242.12": No space left on device
+ERROR 53400 temporary file size exceeds temp_file_limit (424242kB)
+ERROR 53200 out of memory after 424242 bytes
+ERROR 53100 could not resize shared memory segment "/PostgreSQL.424242" to 424242 bytes: No space left on device
+ERROR 58P01 could not open file "/var/lib/postgresql/SECRET-1/base/16384/424242": No such file or directory
+ERROR 58030 could not read block 424242 in file "base/16384/424242": read only 0 of 8192 bytes
+ERROR XX001 invalid page in block 424242 of relation base/16384/424242
+WARNING 01000 page verification failed, calculated checksum 424242 but expected 4242
+ERROR 58P01 could not open file "C:\\Program Files\\PostgreSQL\\SECRET-1\\data\\base\\1\\1259": No such file or directory
+ERROR 58P01 could not access file "/usr/lib/postgresql/16/lib/SECRET-1.so": No such file or directory
+ERROR 42501 could not open file "/home/SECRET-1/export.csv" for reading: Permission denied
+ERROR 58P01 could not stat file "./SECRET-1/pg_ident.conf": No such file or directory
+ERROR XX000 could not find block containing chunk 0x424242
+ERROR XX000 unexpected data beyond EOF in block 424242 of relation base/16384/16385
+ERROR XX000 cache lookup failed for relation 424242
+ERROR XX000 cache lookup failed for type 424242
+ERROR 42704 could not open relation with OID 424242
+ERROR 42P01 relation 424242 does not exist
+ERROR XX000 could not access status of transaction 424242
+ERROR XX000 missing chunk number 0 for toast value 424242 in pg_toast_2619
+ERROR XX000 found xmin 424242 from before relfrozenxid 4242
+ERROR 55000 cannot drop the currently open database 424242
+
+# Locks and deadlocks
+LOG - process 424242 still waiting for ShareLock on transaction 424242 after 1000.042 ms
+LOG - process 424242 acquired ShareLock on transaction 424242 after 4242.424 ms
+LOG - process 424242 still waiting for AccessExclusiveLock on relation 424242 of database 16384 after 1000.4 ms
+LOG - process 424242 acquired ExclusiveLock on tuple (424242,1) of relation 16384 of database 16385 after 1500.4 ms
+LOG - process 424242 detected deadlock while waiting for AccessExclusiveLock on relation 424242 of database 5 after 1000.1 ms
+LOG - process 424242 avoided deadlock for AccessExclusiveLock on relation 424242 of database 16384 by rearranging queue order after 1000.424 ms
+LOG - process 424242 still waiting for RowExclusiveLock on advisory lock [16384,424242,0,1] after 1000.042 ms
+LOG - process 424242 still waiting for ShareLock on virtual transaction 42/424242 after 1000.042 ms
+LOG - process 424242 still waiting for ExclusiveLock on extension of relation 424242 of database 16384 after 1000.042 ms
+LOG - process 424242 still waiting for ShareLock on transaction 4242; Process holding the lock: 424242. Wait queue: 424242, 4243.
+ERROR 40P01 deadlock detected after 424242 ms
+ERROR 40P01 deadlock detected\nProcess 424242 waits for ShareLock on transaction 424242; blocked by process 4243.\nProcess 4243 waits for ShareLock on transaction 424241; blocked by process 424242.\nProcess 424242: UPDATE accounts SET balance = balance - 100 WHERE owner = 'SECRET-1'\nProcess 4243: UPDATE accounts SET balance = balance + 100 WHERE email = '{email}'
+ERROR 40P01 deadlock detected\nProcess 424242 waits for ExclusiveLock on tuple (0,42) of relation 424242 of database 16384; blocked by process 4243.
+ERROR 55P03 could not obtain lock on row in relation "orders" after 424242 ms
+ERROR 55P03 canceling statement due to lock timeout after 424242 ms
+ERROR 57014 canceling statement due to statement timeout of 424242 ms
+ERROR 57014 canceling statement due to user request from pid 424242
+ERROR 40001 could not serialize access due to concurrent update of tuple (424242,3)
+ERROR 40001 could not serialize access due to read/write dependencies among transactions, reason code 424242
+FATAL 57P01 terminating connection due to administrator command from pid 424242
+FATAL 25P03 terminating connection due to idle-in-transaction timeout of 424242 ms
+FATAL 57P05 terminating connection due to idle-session timeout after 424242 s
+LOG - could not send data to client: Broken pipe, session 6718a42b.424242
+LOG - could not receive data from client: Connection reset by peer, backend 424242
+LOG - unexpected EOF on client connection with an open transaction 424242
+ERROR 25P02 current transaction is aborted, commands ignored until end of transaction block, xid 424242
+
+# Statements: duration and log_statement
+LOG - duration: 0.512 ms  statement: SELECT * FROM users WHERE email = '{email}'
+LOG - duration: 424242.424 ms  statement: SELECT * FROM users WHERE id = 424242 AND name = 'SECRET-1'
+LOG - statement: SELECT * FROM users WHERE email = '{email}' AND token = 'SECRET-1'
+LOG - statement: SELECT *\n  FROM users\n WHERE email = '{email}'\n   AND id = 424242
+LOG - statement: UPDATE accounts SET balance = 424242, note = 'SECRET-1' WHERE email = '{email}'
+LOG - statement: UPDATE users SET email='{email}',updated_at=now() WHERE id=424242
+LOG - statement: INSERT INTO users (email, name) VALUES ('{email}', 'SECRET-1')
+LOG - statement: INSERT INTO users (email, name) VALUES ('{email}', 'SECRET-1'), ('a@b.c', 'x')
+LOG - statement: INSERT INTO users (id, email) VALUES (424242, '{email}') RETURNING id
+LOG - statement: INSERT INTO users (id, email) VALUES (424242, lower('{email}'))
+LOG - statement: INSERT INTO t SELECT 424242, 'SECRET-1'
+LOG - statement: INSERT INTO users (email) VALUES ('{email}') ON CONFLICT (email) DO UPDATE SET seen = 424242
+LOG - statement: DELETE FROM sessions WHERE token = 'SECRET-1' OR user_email = '{email}'
+LOG - statement: SELECT * FROM t WHERE a IN (424242, 1, 2)
+LOG - statement: SELECT * FROM users WHERE email IN ('{email}', 'SECRET-1')
+LOG - statement: SELECT * FROM users WHERE email NOT IN ('{email}')
+LOG - statement: SELECT * FROM users WHERE email = ANY(ARRAY['{email}', 'SECRET-1'])
+LOG - statement: SELECT * FROM users WHERE email = ANY('{{email},SECRET-1}'::text[])
+LOG - statement: SELECT * FROM t LIMIT 424242 OFFSET 424242
+LOG - statement: SELECT * FROM t WHERE id = -424242
+LOG - statement: SELECT * FROM t WHERE amount > 4242.42e2 AND amount < 424242.0
+LOG - statement: SELECT * FROM t WHERE flags = x'424242' OR mask = 0x424242
+LOG - statement: SELECT * FROM t WHERE bits = B'1010' AND note = N'SECRET-1'
+LOG - statement: SELECT '0/424242'::pg_lsn - '0/0'::pg_lsn
+LOG - statement: SELECT * FROM t WHERE created_at > now() - interval '424242 seconds'
+LOG - statement: SELECT * FROM t WHERE d = date '2026-10-24' AND note = 'SECRET-1'
+LOG - statement: SELECT * FROM t WHERE d = date'2026-10-24' AND note = text'SECRET-1'
+LOG - statement: SELECT'SECRET-1'
+LOG - statement: SELECT * FROM users WHERE email LIKE '%{email}%'
+LOG - statement: SELECT * FROM users WHERE email ILIKE '{email}' ESCAPE '!'
+LOG - statement: SELECT * FROM users WHERE email ~ '^secret4@example\\.com$'
+LOG - statement: SELECT * FROM users WHERE email = 'O''Brien {email}'
+LOG - statement: SELECT * FROM users WHERE email = E'O\\'Brien {email}'
+LOG - statement: SELECT E'SECRET-1\\n', E'\\x42\\u0042 {email}'
+LOG - statement: SELECT U&'SECRET-1 \\0041' UESCAPE '\\'
+LOG - statement: SELECT $$SECRET-1$$, $tag${email}$tag$
+LOG - statement: DO $$BEGIN PERFORM 424242; RAISE NOTICE 'SECRET-1'; END$$
+LOG - statement: DO $body$\nBEGIN\n  UPDATE users SET email = '{email}' WHERE id = 424242;\nEND\n$body$ LANGUAGE plpgsql
+LOG - statement: CREATE FUNCTION f() RETURNS text AS $fn$ SELECT 'SECRET-1' $fn$ LANGUAGE sql
+LOG - statement: SELECT * FROM users WHERE profile @> '{"email": "{email}"}'::jsonb
+LOG - statement: SELECT profile->>'email' FROM users WHERE profile->>'email' = '{email}'
+LOG - statement: SELECT jsonb_build_object('email', '{email}', 'pin', 424242)
+LOG - statement: SELECT set_config('app.user', 'SECRET-1', false)
+LOG - statement: SELECT pg_terminate_backend(424242)
+LOG - statement: SELECT pg_cancel_backend(424242), pg_sleep(424242)
+LOG - statement: SELECT pg_advisory_lock(424242)
+LOG - statement: CALL process_order(424242, 'SECRET-1', '{email}')
+LOG - statement: SELECT send_mail('{email}', subject => 'SECRET-1')
+LOG - statement: SELECT 1; SELECT 'SECRET-1'; SELECT 424242
+LOG - statement: SELECT 1 -- {email}
+LOG - statement: SELECT 424242 -- user's token SECRET-1\n, '{email}'
+LOG - statement: /* user=SECRET-2 */ SELECT * FROM t WHERE id = 424242
+LOG - statement: /* outer /* SECRET-1 */ still comment {email} */ SELECT 424242
+LOG - statement: SELECT /* app:checkout, user:{email} */ * FROM carts WHERE id = 424242
+LOG - statement: SELECT 'SECRET-1
+LOG - statement: SELECT * FROM t WHERE email = '{email}
+LOG - statement: SELECT $$SECRET-1
+LOG - statement: ALTER ROLE app PASSWORD 'SECRET-1'
+LOG - statement: CREATE USER bob WITH PASSWORD 'SECRET-1' VALID UNTIL '2026-12-31'
+LOG - statement: ALTER USER bob WITH ENCRYPTED PASSWORD 'SCRAM-SHA-256$4096:SECRET-1'
+LOG - statement: CREATE USER MAPPING FOR app SERVER remote OPTIONS (user 'SECRET-1', password 'SECRET-1')
+LOG - statement: CREATE SUBSCRIPTION sub CONNECTION 'host=db1 user=SECRET-2 password=SECRET-1' PUBLICATION pub
+LOG - statement: SELECT dblink_connect('host=db1 user=SECRET-2 password=SECRET-1')
+LOG - statement: SET application_name = 'SECRET-1'
+LOG - statement: SET app.tenant_id = 424242
+LOG - statement: SET LOCAL statement_timeout = '424242ms'
+LOG - statement: COPY users (email) FROM STDIN WITH (FORMAT csv, NULL 'SECRET-1')
+LOG - statement: COPY (SELECT * FROM users WHERE email = '{email}') TO '/tmp/SECRET-1.csv' WITH CSV
+LOG - statement: COPY users FROM '/home/SECRET-1/users.csv' DELIMITER ';'
+LOG - statement: COPY users TO PROGRAM 'gzip > /backup/SECRET-1.gz'
+LOG - statement: FETCH 424242 FROM c1
+LOG - statement: MOVE FORWARD 424242 IN c1
+LOG - statement: PREPARE p(int, text) AS SELECT * FROM t WHERE id = $1 AND note = $2; EXECUTE p(424242, 'SECRET-1')
+LOG - statement: EXECUTE p(424242, '{email}')
+LOG - statement: SELECT * FROM t WHERE ts BETWEEN '2026-01-01' AND '2026-12-31' AND note = 'SECRET-1'
+LOG - statement: SELECT * FROM t ORDER BY id DESC LIMIT 424242
+LOG - statement: SELECT CASE WHEN id = 424242 THEN 'SECRET-1' ELSE 'x' END FROM t
+LOG - statement: SELECT * FROM t WHERE (a, b) = (424242, 'SECRET-1')
+LOG - statement: SELECT * FROM t WHERE a = 424242::bigint AND b = 'SECRET-1'::text
+LOG - statement: SELECT * FROM t WHERE a = CAST('SECRET-1' AS text)
+LOG - statement: SELECT * FROM t WHERE ip = '10.42.42.42'::inet AND uid = 'SECRET-1'::uuid
+LOG - statement: SELECT * FROM t WHERE email = '{email}'\t AND\tid=424242
+LOG - statement: SELECT 'a'||'SECRET-1'||'{email}'
+LOG - statement: SELECT * FROM t WHERE x=+424242
+LOG - statement: SELECT * FROM t WHERE x = .424242
+LOG - statement: SELECT * FROM t WHERE x = 424242.
+LOG - statement: SELECT * FROM t WHERE x = 424_242 OR y = 424242
+LOG - statement: SELECT * FROM t WHERE x = 0b1010 OR y = 0o777 OR z = 424242
+LOG - statement: SELECT * FROM "Users" u WHERE u."Email" = '{email}'
+LOG - statement: VACUUM (VERBOSE) orders; SELECT 'SECRET-1'
+LOG - statement: BEGIN; UPDATE t SET v = 'SECRET-1' WHERE id = 424242; COMMIT
+LOG - statement: LISTEN ch; NOTIFY ch, 'SECRET-1'
+LOG - statement: SELECT pg_notify('ch', '{email}')
+LOG - statement: COMMENT ON TABLE t IS 'SECRET-1'
+LOG - statement: SELECT lo_import('/home/SECRET-1/file.bin')
+LOG - statement: SELECT pg_read_file('/etc/SECRET-1')
+LOG - statement: SELECT * FROM generate_series(1, 424242)
+
+# Statements: extended protocol
+LOG - duration: 0.042 ms  parse <unnamed>: SELECT * FROM users WHERE email = '{email}'
+LOG - duration: 0.042 ms  parse S_424242: SELECT * FROM users WHERE id = $1
+LOG - duration: 0.042 ms  bind S_1: INSERT INTO t VALUES ($1, 'SECRET-1')
+LOG - duration: 0.042 ms  bind <unnamed>: SELECT * FROM t WHERE id = 424242
+LOG - duration: 3.1 ms  execute S_7: select a from b where c in (424242, 2, 3)
+LOG - duration: 1.234 ms  execute <unnamed>: SELECT * FROM users WHERE email = '{email}' AND id = $1
+LOG - execute <unnamed>: UPDATE users SET token = 'SECRET-1' WHERE id = $1
+LOG - execute S_424242: SELECT 1
+LOG - execute fetch from S_3/C_4: SELECT * FROM users WHERE email = '{email}'
+LOG - execute pdo_stmt_00000042: SELECT * FROM t WHERE id = 424242
+LOG - duration: 0.042 ms  execute sqlx_s_424242: SELECT * FROM t WHERE email = '{email}'
+LOG - fastpath function call: "lo_open" (OID 424242)
+LOG - duration: 424242 ms  statement: SELECT pg_sleep(4)
+LOG - duration: 1.5 s  statement: SELECT * FROM t WHERE note = 'SECRET-1'
+LOG - duration: 1500.2 ms  plan:\nQuery Text: SELECT * FROM users WHERE email = '{email}'\nSeq Scan on users  (cost=0.00..424242.00 rows=1 width=42)\n  Filter: (email = '{email}'::text)
+LOG - duration: 424242.1 ms  plan:\n{"Query Text": "SELECT * FROM t WHERE token = 'SECRET-1'", "Plan": {"Node Type": "Seq Scan"}}
+ERROR 42601 syntax error at or near "'SECRET-1'"
+ERROR 42601 syntax error at or near "424242"
+ERROR 42601 unterminated quoted string at or near "'SECRET-1"
+ERROR 42601 unterminated dollar-quoted string at or near "$$SECRET-1"
+ERROR 42601 syntax error at or near "E'SECRET-1'"
+ERROR 42601 syntax error at end of input at character 424242
+
+# Class 22: data exception
+ERROR 22P02 invalid input syntax for type integer: "SECRET-3"
+ERROR 22P02 invalid input syntax for type bigint: "424242x"
+ERROR 22P02 invalid input syntax for type uuid: "SECRET-3"
+ERROR 22P02 invalid input syntax for type boolean: "SECRET-3"
+ERROR 22P02 invalid input syntax for type numeric: "SECRET-3"
+ERROR 22P02 invalid input syntax for type inet: "SECRET-3"
+ERROR 22P02 invalid input syntax for type json: "SECRET-3"
+ERROR 22P02 invalid input syntax for integer: "SECRET-3"
+ERROR 22P02 invalid input value for enum order_status: "SECRET-3"
+ERROR 22P02 malformed array literal: "{SECRET-3}"
+ERROR 22P02 malformed record literal: "(SECRET-3,424242)"
+ERROR 22P02 malformed range literal: "[SECRET-3"
+ERROR 22P02 invalid input syntax for type point: "SECRET-3"
+ERROR 22007 invalid input syntax for type timestamp: "SECRET-3"
+ERROR 22007 invalid input syntax for type date: "SECRET-3"
+ERROR 22008 date/time field value out of range: "SECRET-3"
+ERROR 22008 date/time field value out of range: "424242-01-01"
+ERROR 22003 value "424242424242" is out of range for type integer
+ERROR 22003 value "SECRET-3" is out of range for type smallint
+ERROR 22003 numeric field overflow at 424242
+ERROR 22001 value too long for type character varying(424242)
+ERROR 22001 value too long for type character(42): "SECRET-3"
+ERROR 22023 invalid value for parameter "TimeZone": "SECRET-3"
+ERROR 22023 unrecognized key word: "SECRET-3"
+ERROR 22023 invalid regular expression option: "SECRET-3"
+ERROR 22004 null value cannot be assigned to variable "SECRET-3" declared NOT NULL
+ERROR 22021 invalid byte sequence for encoding "UTF8": 0x42 0x42 in "SECRET-3"
+ERROR 22021 character with byte sequence 0x424242 in encoding "UTF8" has no equivalent in encoding "LATIN1"
+ERROR 2201B invalid regular expression: quantifier operand invalid in "SECRET-3"
+ERROR 22P04 extra data after last expected column in "SECRET-3"
+ERROR 22P04 missing data for column "SECRET-3", line 424242
+ERROR 22025 invalid escape string "SECRET-3"
+ERROR 2200N invalid XML content: "SECRET-3"
+ERROR 22030 duplicate JSON object key value: "SECRET-3"
+ERROR 22032 invalid input syntax for type json: "SECRET-3" at line 424242
+ERROR 22P05 unsupported Unicode escape sequence \\u0000 in "SECRET-3"
+ERROR 22003 integer out of range: 424242424242
+ERROR 22012 division by zero at "SECRET-3"
+WARNING 22P06 nonstandard use of \\' in a string literal at character 424242
+ERROR 22P02 ungültige Eingabesyntax für Typ integer: »SECRET-1« "SECRET-3"
+
+# Class 23: integrity constraint violation
+ERROR 23505 duplicate key value violates unique constraint "users_SECRET-3_key"
+ERROR 23505 duplicate key value violates unique constraint "SECRET-3"
+ERROR 23503 insert or update on table "orders" violates foreign key constraint "SECRET-3"
+ERROR 23503 update or delete on table "SECRET-3" violates foreign key constraint "orders_user_fkey" on table "orders"
+ERROR 23502 null value in column "SECRET-3" of relation "users" violates not-null constraint
+ERROR 23514 new row for relation "users" violates check constraint "SECRET-3"
+ERROR 23514 check constraint "SECRET-3" of relation "users" is violated by some row
+ERROR 23P01 conflicting key value violates exclusion constraint "SECRET-3"
+ERROR 23505 could not create unique index "SECRET-3"
+ERROR 23505 doppelter Schlüsselwert verletzt Unique-Constraint »SECRET-3« "SECRET-3"
+
+# "for type" outside classes 22 and 23 (REQ-005 masks it in every class)
+LOG - invalid input syntax for type integer: "SECRET-3"
+WARNING 01000 invalid input syntax for type uuid: "SECRET-3"
+ERROR XX000 invalid input syntax for type timestamp with time zone: "SECRET-3"
+ERROR 42804 invalid input value for enum mood: "SECRET-3"
+
+# Other severities
+DEBUG1 - autovacuum: processing database "shop" after 424242 ms
+DEBUG2 - InitPostgres for pid 424242
+DEBUG3 - StartTransaction(424242) name: unnamed; blockState: DEFAULT; state: INPROGRESS, xid/subid/cid: 424242/1/0
+DEBUG5 - CommitTransaction(1) name: unnamed; blockState: STARTED; state: INPROGRESS, xid/subid/cid: 0/1/424242
+INFO - vacuuming "shop.public.orders" pages 424242
+INFO - "orders": found 424242 removable, 424242 nonremovable row versions in 4242 out of 424242 pages
+INFO - analyzing "public.orders" sample of 424242 rows
+NOTICE 00000 table "t" does not exist, skipping after 424242 ms
+NOTICE 42P07 relation "t" already exists, skipping (oid 424242)
+WARNING 25P01 there is no transaction in progress (xid 424242)
+WARNING 01000 out of shared memory at 424242
+WARNING 57P02 terminating connection because of crash of another server process 424242
+LOG - statement: SELECT 'SECRET-1' -- logged by log_statement=all for user=SECRET-2
