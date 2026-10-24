@@ -33,9 +33,18 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	msg := r.Message
 	z := tokenizer{s: msg}
 	var p placeholders
+	quotedData := isDataClass(r.SQLState)
 	prev := tokSpace // kind of the token before t
 	idNext := false  // the last word, before white space, is followed by an id
+	var after forState
 	for {
+		if end, ok := z.pathAt(z.pos); ok {
+			// REQ-007: a bare path is a value up to where pathLen ends it.
+			dst = p.appendNext(dst)
+			z.pos = end
+			prev, idNext, after = tokParam, false, forNone
+			continue
+		}
 		t, ok := z.next()
 		if !ok {
 			return dst
@@ -48,13 +57,17 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 			// give the same template.
 			dst = p.appendNext(append(dst, '='))
 			z.skipValue()
-			prev, idNext = tokParam, false
+			prev, idNext, after = tokParam, false, forNone
 			continue
 		case masksLiteral(t.kind), t.kind == tokWord && idNext && hasDigit(msg[t.start:t.end]):
 			// REQ-006: a word with a digit after an id word, such as the
 			// session id in "session 5f3c1a2b.4d2", is an id. Numeric ids
 			// and the LSN-shaped virtual transaction id "3/1234" are already
 			// literals.
+			dst = p.appendNext(dst)
+		case t.kind == tokIdent && (quotedData || after == forData || isQuotedPath(msg[t.start:t.end])):
+			// REQ-005 and REQ-007: a double-quoted token is an identifier
+			// and stays, unless it holds data or a path.
 			dst = p.appendNext(dst)
 		default:
 			dst = append(dst, msg[t.start:t.end]...)
@@ -66,8 +79,136 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 		default:
 			idNext = false
 		}
+		after = after.next(t.kind, msg[t.start:t.end])
 		prev = t.kind
 	}
+}
+
+// isDataClass reports whether a SQLSTATE is in class 22 (data exception) or
+// 23 (integrity constraint violation). In those classes PostgreSQL puts data
+// in double quotes, so every double-quoted token is masked (REQ-005). The
+// constraint name of a 23505 goes with it, which GUD-001 accepts.
+func isDataClass(code [5]byte) bool {
+	return code[0] == '2' && (code[1] == '2' || code[1] == '3')
+}
+
+// forState tracks the phrase that introduces a data value in any SQLSTATE
+// class (REQ-005): the word "for", then only words, white space and
+// double-quoted tokens, then ':'. The first double-quoted token after that
+// ':' is data. This covers "invalid input syntax for type integer: "abc"",
+// the older "invalid input syntax for integer: "abc"" and, by GUD-001,
+// "invalid input value for enum mood: "x"". Any other token on the way
+// drops the state, so "for user "bob"" keeps the role.
+type forState uint8
+
+const (
+	forNone  forState = iota
+	forWords          // "for" seen, waiting for ':'
+	forData           // ':' seen, the next double-quoted token is data
+)
+
+// next returns the state after a token of kind k with text b.
+func (f forState) next(k tokKind, b []byte) forState {
+	switch k {
+	case tokSpace:
+		return f
+	case tokWord:
+		if equalFoldASCII(b, "for") {
+			return forWords
+		}
+		if f == forWords {
+			return f
+		}
+	case tokIdent:
+		if f == forWords {
+			return f
+		}
+	case tokPunct:
+		if f == forWords && b[0] == ':' {
+			return forData
+		}
+	}
+	return forNone
+}
+
+// pathAt reports whether a file path starts at i, and where it ends
+// (REQ-007). It applies only in message mode, so "a /b" in a statement stays
+// a division. The byte before i must not be a word byte, '/', '.', a closing
+// bracket, '\' or '$', so "a/b", "(x)/y" and the '/' inside a token are
+// not paths. An LSN never reaches here: the tokenizer takes "0/16B3748" as
+// one token.
+func (z *tokenizer) pathAt(i int) (int, bool) {
+	s := z.s
+	if z.stmt || i >= len(s) {
+		return 0, false
+	}
+	if i > 0 {
+		switch c := s[i-1]; {
+		case isWordByte(c), c == '/', c == '.', c == ')', c == ']', c == '\\', c == '$':
+			return 0, false
+		}
+	}
+	if !pathPrefix(s[i:]) {
+		return 0, false
+	}
+	return i + pathLen(s[i:]), true
+}
+
+// pathPrefix reports whether s starts with a file path: "/" before a word
+// byte or '.', "./", "../", "base/", "global/", "pg_<word>/", or a drive
+// letter with ":\" or ":/". PostgreSQL on Windows writes both separators.
+// "global/" is not in REQ-007, but global/pg_control is a data directory
+// path like base/, so GUD-001 masks it too.
+func pathPrefix(s []byte) bool {
+	n := len(s)
+	if n == 0 {
+		return false
+	}
+	switch {
+	case s[0] == '/':
+		return n > 1 && (isWordByte(s[1]) || s[1] == '.')
+	case bytes.HasPrefix(s, []byte("./")), bytes.HasPrefix(s, []byte("../")):
+		return true
+	case n >= 3 && s[0]|0x20 >= 'a' && s[0]|0x20 <= 'z' && s[1] == ':' && (s[2] == '\\' || s[2] == '/'):
+		return true
+	}
+	j := 0
+	for j < n && isWordByte(s[j]) {
+		j++
+	}
+	if j == 0 || j >= n || s[j] != '/' {
+		return false
+	}
+	w := s[:j]
+	return string(w) == "base" || string(w) == "global" || (j > 3 && string(w[:3]) == "pg_")
+}
+
+// pathLen returns the length of the bare path at the start of s. The path
+// ends at white space or a quote, or at ',', ';', ':', ')' or '.' when that
+// byte ends the input or comes before white space, so the punctuation of the
+// sentence around the path stays. A bare path with a space in it, such as
+// C:/Program Files/..., is cut at the space; quoted paths have no such limit.
+func pathLen(s []byte) int {
+	for i, c := range s {
+		switch {
+		case isTemplateSpace(c), c == '"', c == '\'':
+			return i
+		case c == ',', c == ';', c == ':', c == ')', c == '.':
+			if i+1 == len(s) || isTemplateSpace(s[i+1]) {
+				return i
+			}
+		}
+	}
+	return len(s)
+}
+
+// isQuotedPath reports whether the double-quoted token b, "x" or U&"x",
+// holds a file path (REQ-007), as in path "base/pgsql_tmp/pgsql_tmp1234.0".
+func isQuotedPath(b []byte) bool {
+	if b[0] != '"' {
+		b = b[2:] // U&
+	}
+	return pathPrefix(b[1:])
 }
 
 // skipValue moves pos past the value of a key=value pair that starts at pos.
