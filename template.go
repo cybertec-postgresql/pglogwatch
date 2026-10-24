@@ -786,11 +786,13 @@ func patternHead(dst []byte, r *Record) []byte {
 //   - tokHex: "0x1F", the octal "0o17" and binary "0b101" integers, and
 //     outside statement mode an LSN "0/16B3748". An LSN
 //     followed by '/' is left alone so the path rule can take it.
-//   - tokString: a single-quoted literal with its prefix: 'x', E'x' (backslash
-//     escapes), U&'x', B'x', X'x', N'x'. A doubled quote does not end it. In
-//     a message a quote right after a word byte is punctuation, so "can't"
-//     is not a literal; in a statement it starts a literal, as in
-//     date'2026-01-01'. An unterminated literal runs to the end of the input.
+//   - tokString: a single-quoted literal 'x', and in statement mode also with
+//     a prefix: E'x' (backslash escapes), U&'x', B'x', X'x', N'x'. A doubled
+//     quote does not end it. In a message a quote right after a word byte is
+//     punctuation, so "can't" and the French "n'a" are not literals and the
+//     letter before the quote is a word; in a statement the quote starts a
+//     literal, as in date'2026-01-01'. An unterminated literal runs to the end
+//     of the input.
 //   - tokDollar: a dollar-quoted literal $tag$...$tag$ (the tag may be empty),
 //     running to the end of the input when unterminated.
 //   - tokIdent: a double-quoted token, "x" or U&"x", with doubled quotes, or
@@ -1049,15 +1051,15 @@ func (z *tokenizer) scanWordish(start int) (tokKind, int) {
 	at := func(i int, c byte) bool { return i < len(s) && s[i] == c }
 	switch s[start] {
 	case 'E', 'e':
-		if at(start+1, '\'') {
+		if z.stmt && at(start+1, '\'') {
 			return tokString, scanQuoted(s, start+2, '\'', true)
 		}
 	case 'B', 'b', 'X', 'x', 'N', 'n':
-		if at(start+1, '\'') {
+		if z.stmt && at(start+1, '\'') {
 			return tokString, scanQuoted(s, start+2, '\'', false)
 		}
 	case 'U', 'u':
-		if at(start+1, '&') && at(start+2, '\'') {
+		if z.stmt && at(start+1, '&') && at(start+2, '\'') {
 			return tokString, scanQuoted(s, start+3, '\'', false)
 		}
 		if at(start+1, '&') && at(start+2, '"') {
