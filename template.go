@@ -2,6 +2,7 @@ package pglogwatch
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"strconv"
 	"unicode/utf8"
 )
@@ -652,15 +653,64 @@ func masksLiteral(k tokKind) bool {
 // PatternID returns the pattern identity of a template made by
 // [AppendTemplate] for r.
 //
-// The id covers r.Severity, r.SQLState, [TemplateRulesVersion] and the
-// template, so the same message text under a different severity or SQLSTATE
-// is a different pattern. It is a fixed-size array so that it can be a map
-// key and costs no allocation. template may be the borrowed result of
-// AppendTemplate; PatternID does not retain it.
+// The id is the first 8 bytes of SHA-256 over the severity name, a 0x00
+// byte, the five SQLSTATE bytes, a 0x00 byte, [TemplateRulesVersion] in
+// decimal, a 0x00 byte and the template (REQ-010). The severity name is
+// r.Severity.String(), so SeverityUnknown hashes as an empty name and all
+// records of unknown severity share ids by SQLSTATE and template. A zero
+// r.SQLState hashes as no bytes at all, not as five zero bytes.
+//
+// The same message text under a different severity or SQLSTATE is therefore
+// a different pattern. The id is a fixed-size array so that it can be a map
+// key. PatternID does not allocate for any template AppendTemplate makes
+// (CON-001); a template longer than 1,027 bytes, which only a caller can
+// supply, may cost one hash state on the heap. template may be the borrowed
+// result of AppendTemplate; PatternID does not retain it.
+//
+// To print the id as 16 lowercase hex characters, use encoding/hex:
+//
+//	id := PatternID(r, tmpl)
+//	s := hex.EncodeToString(id[:])
+//
+// or hex.AppendEncode(dst, id[:]) to append it without a new string.
 func PatternID(r *Record, template []byte) [8]byte {
-	// The hash comes in later; until then every pattern has the zero id.
-	_, _ = r, template
-	return [8]byte{}
+	// The hash input is built in one stack buffer and hashed with Sum256,
+	// because sha256.New escapes to the heap. Every template AppendTemplate
+	// makes fits (REQ-011); a longer one passed by hand goes through
+	// sha256.New, which allocates.
+	var buf [patternHeadMax + templateLimit + len(ellipsis)]byte
+	in := patternHead(buf[:0], r)
+	var sum [sha256.Size]byte
+	if len(in)+len(template) <= len(buf) {
+		sum = sha256.Sum256(append(in, template...))
+	} else {
+		h := sha256.New()
+		_, _ = h.Write(in)
+		_, _ = h.Write(template)
+		h.Sum(sum[:0])
+	}
+	var id [8]byte
+	copy(id[:], sum[:])
+	return id
+}
+
+// patternHeadMax is the longest input patternHead appends: a severity name
+// of at most 7 bytes, a five-byte SQLSTATE, a decimal int of at most 20
+// bytes and three 0x00 separators.
+const patternHeadMax = 7 + 5 + 20 + 3
+
+// patternHead appends the part of the PatternID hash input that comes
+// before the template: severity, 0x00, SQLSTATE or nothing, 0x00, rule
+// version, 0x00.
+func patternHead(dst []byte, r *Record) []byte {
+	dst = append(dst, r.Severity.String()...)
+	dst = append(dst, 0)
+	if r.SQLState != [5]byte{} {
+		dst = append(dst, r.SQLState[:]...)
+	}
+	dst = append(dst, 0)
+	dst = strconv.AppendInt(dst, TemplateRulesVersion, 10)
+	return append(dst, 0)
 }
 
 // Tokenizer contract, for the masking rules built on it.

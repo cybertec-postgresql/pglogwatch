@@ -88,7 +88,7 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 
 **Independent test**: `TestPatternID` pins the id of one golden row to a hex value computed by hand, and two records that differ only in values share an id.
 
-- [ ] T011 [US3] Implement `PatternID` as the first 8 bytes of SHA-256 over `severity`, `0x00`, `sqlstate` (five bytes, or empty when zero), `0x00`, the decimal `TemplateRulesVersion`, `0x00`, `template`, with no allocation (REQ-010, CON-001). Document how to print it as 16 lowercase hex characters with `encoding/hex`. Add `TestPatternID` and `TestSameShapeSameID` with pairs of records that differ only in values (AC-003)
+- [x] T011 [US3] Implement `PatternID` as the first 8 bytes of SHA-256 over `severity`, `0x00`, `sqlstate` (five bytes, or empty when zero), `0x00`, the decimal `TemplateRulesVersion`, `0x00`, `template`, with no allocation (REQ-010, CON-001). Document how to print it as 16 lowercase hex characters with `encoding/hex`. Add `TestPatternID` and `TestSameShapeSameID` with pairs of records that differ only in values (AC-003)
 
 **Checkpoint**: the API is complete.
 
