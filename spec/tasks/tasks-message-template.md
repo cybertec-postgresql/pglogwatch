@@ -76,7 +76,7 @@ description: "Task list for pglogwatch: mask a record's message into a template"
 
 - [x] T008 [US2] Detect the markers `statement: `, `execute <name>: `, `parse <name>: `, `bind <name>: ` and `fastpath function call: `; keep the marker, mask the prepared statement name to `$n`, and mask the statement: literals become `$n`, white space runs collapse to one space, `--` and `/* */` comments are removed, keyword case and identifiers stay (REQ-009). White space collapse also applies before the marker, so `12.345 ms  statement:` becomes `$1 statement:`. Tests in `template_test.go`
 - [x] T009 [US2] Collapse `IN (…)` and `VALUES (…), (…)` lists made only of placeholders to `IN (...)` and `VALUES (...)` (REQ-009). Tests in `template_test.go`
-- [ ] T010 [US2] Cut at `plan:` after a duration and end the template with `plan: …` (REQ-012); cut any template longer than 1,024 bytes at the last UTF-8 boundary before 1,024 bytes and append `…` (REQ-011). Tests in `template_test.go`
+- [x] T010 [US2] Cut at `plan:` after a duration and end the template with `plan: …` (REQ-012); cut any template longer than 1,024 bytes at the last UTF-8 boundary before 1,024 bytes and append `…` (REQ-011). Tests in `template_test.go`
 
 **Checkpoint**: every row of the section 4 table passes; no golden row is skipped.
 
