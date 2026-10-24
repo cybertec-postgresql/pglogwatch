@@ -105,7 +105,8 @@ func TestAllStopsWhereTheLoopBroke(t *testing.T) {
 	p := New(bytes.NewReader(fixture(t, "stderr/basic.log")), Config{Format: FormatStderr})
 
 	first := 0
-	for range p.All() {
+	for _, err := range p.All() {
+		require.NoError(t, err)
 		first++
 		if first == 2 {
 			break
