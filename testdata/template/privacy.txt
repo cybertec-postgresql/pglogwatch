@@ -325,17 +325,22 @@ ERROR 22012 division by zero at "SECRET-3"
 WARNING 22P06 nonstandard use of \\' in a string literal at character 424242
 ERROR 22P02 ungültige Eingabesyntax für Typ integer: »SECRET-1« "SECRET-3"
 
-# Class 23: integrity constraint violation
-ERROR 23505 duplicate key value violates unique constraint "users_SECRET-3_key"
-ERROR 23505 duplicate key value violates unique constraint "SECRET-3"
-ERROR 23503 insert or update on table "orders" violates foreign key constraint "SECRET-3"
-ERROR 23503 update or delete on table "SECRET-3" violates foreign key constraint "orders_user_fkey" on table "orders"
+# Class 23: integrity constraint violation. The name after "constraint",
+# "index" or "table" stays (REQ-005), so a marker sits there only where
+# REQ-014 masks it: a body that starts with a digit, a sign or '$', holds a
+# quote, or is a path.
+ERROR 23505 duplicate key value violates unique constraint "424242_key"
+ERROR 23505 duplicate key value violates unique constraint "'SECRET-1'"
+ERROR 23503 insert or update on table "orders" violates foreign key constraint "-SECRET-3"
+ERROR 23503 update or delete on table "/tmp/SECRET-1" violates foreign key constraint "orders_user_fkey" on table "orders"
 ERROR 23502 null value in column "SECRET-3" of relation "users" violates not-null constraint
-ERROR 23514 new row for relation "users" violates check constraint "SECRET-3"
-ERROR 23514 check constraint "SECRET-3" of relation "users" is violated by some row
-ERROR 23P01 conflicting key value violates exclusion constraint "SECRET-3"
-ERROR 23505 could not create unique index "SECRET-3"
-ERROR 23505 doppelter Schlüsselwert verletzt Unique-Constraint »SECRET-3« "SECRET-3"
+ERROR 23502 null value in column "email" of relation "SECRET-3" violates not-null constraint "users_email_nn"
+ERROR 23514 new row for relation "SECRET-3" violates check constraint "users_check"
+ERROR 23514 check constraint "users_check" of relation "SECRET-3" is violated by some row
+ERROR 23P01 conflicting key value violates exclusion constraint "$SECRET-3"
+ERROR 23505 could not create unique index "424242"
+ERROR 23505 duplicate key value "SECRET-3" violates unique constraint "users_email_key"
+ERROR 23505 doppelter Schlüsselwert verletzt Unique-Constraint »users_pkey« "SECRET-3"
 
 # "for type" outside classes 22 and 23 (REQ-005 masks it in every class)
 LOG - invalid input syntax for type integer: "SECRET-3"

@@ -64,13 +64,20 @@ var templateGolden = []struct {
 		want:     `relation "orders_2026" does not exist`,
 	},
 	{
-		// Class 23 masks every double-quoted token, the constraint name
-		// included (REQ-005, GUD-001).
-		name:     "unique violation masks the constraint in class 23",
+		// Class 23 masks double-quoted tokens, but not the name after the
+		// word "constraint" (REQ-005).
+		name:     "unique violation keeps the constraint in class 23",
 		severity: SeverityError,
 		sqlState: "23505",
 		message:  `duplicate key value violates unique constraint "users_email_key"`,
-		want:     `duplicate key value violates unique constraint $1`,
+		want:     `duplicate key value violates unique constraint "users_email_key"`,
+	},
+	{
+		name:     "foreign key violation keeps the table and the constraint",
+		severity: SeverityError,
+		sqlState: "23503",
+		message:  `insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"`,
+		want:     `insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"`,
 	},
 	{
 		name:     "invalid input syntax masks the quoted data",
@@ -87,6 +94,13 @@ var templateGolden = []struct {
 		sqlState: "28P01",
 		message:  `password authentication failed for user "bob"`,
 		want:     `password authentication failed for user "bob"`,
+	},
+	{
+		name:     "invalid enum value masks the quoted data",
+		severity: SeverityError,
+		sqlState: "22P02",
+		message:  `invalid input value for enum mood: "Ödön"`,
+		want:     `invalid input value for enum mood: $1`,
 	},
 	{
 		name:     "connection authorized masks key=value values",
@@ -284,8 +298,8 @@ var templateQuotedCases = []templateStateCase{
 	{"identifier stays", "42P01", `relation "orders_2026" does not exist`, `relation "orders_2026" does not exist`},
 	{"identifier stays without a SQLSTATE", "", `relation "orders" is locked`, `relation "orders" is locked`},
 	{"class 22 masks every quoted token", "22023", `invalid value "SECRET-3" for "x"`, `invalid value $1 for $2`},
-	{"class 23 masks the constraint", "23503", `insert on table "a" violates foreign key constraint "a_b_fkey"`,
-		`insert on table $1 violates foreign key constraint $2`},
+	{"class 23 masks a column", "23502", `null value in column "a" of relation "b"`,
+		`null value in column $1 of relation $2`},
 	{"class 42 is not a data class", "42703", `column "SECRET" does not exist`, `column "SECRET" does not exist`},
 	{"input syntax for type in another class", "XX000", `invalid input syntax for type integer: "abc"`,
 		`invalid input syntax for type integer: $1`},
@@ -317,7 +331,8 @@ var templateQuotedCases = []templateStateCase{
 }
 
 // TestAppendTemplateQuoted checks REQ-005: a double-quoted token is an
-// identifier and stays, except under SQLSTATE class 22 or 23, and after a
+// identifier and stays, except under SQLSTATE class 22 or 23 (see
+// TestAppendTemplateNames for the names that stay there), and after a
 // "for <words>:" phrase in any class.
 func TestAppendTemplateQuoted(t *testing.T) {
 	for _, c := range templateQuotedCases {
@@ -325,6 +340,38 @@ func TestAppendTemplateQuoted(t *testing.T) {
 			r := &Record{SQLState: sqlState(t, c.state), Message: []byte(c.in)}
 			got := AppendTemplate([]byte("keep:"), r)
 			assert.Equal(t, "keep:"+c.want, string(got))
+		})
+	}
+}
+
+// templateNameCases holds the cases of TestAppendTemplateNames.
+var templateNameCases = []templateStateCase{
+	{"constraint name stays", "23505", `violates constraint "c"`, `violates constraint "c"`},
+	{"upper-case INDEX", "23505", `could not create unique INDEX "i"`, `could not create unique INDEX "i"`},
+	{"two spaces before the name", "23503", `on table  "t" violates`, `on table "t" violates`},
+	{"name in class 22", "22023", `table "t" holds "x"`, `table "t" holds $1`},
+	{"name that starts with a digit", "23505", `violates constraint "123"`, `violates constraint $1`},
+	{"name that is a path", "23503", `on table "/tmp/x"`, `on table $1`},
+	{"name that holds a quote", "23505", `violates constraint "a'b"`, `violates constraint $1`},
+	{"column name is data", "23502", `null value in column "secret"`, `null value in column $1`},
+	{"relation name is data", "23514", `new row for relation "users" violates`, `new row for relation $1 violates`},
+	{"punctuation before the name", "23505", `constraint: "c"`, `constraint: $1`},
+	{"second name after the first", "23505", `constraint "a" "b"`, `constraint "a" $1`},
+	{"word inside another word", "23505", `subconstraint "c"`, `subconstraint $1`},
+	{"guillemets after the word", "23505", `Unique-Constraint »users_pkey«`, `Unique-Constraint »users_pkey«`},
+	{"French word stays masked", "23505", `contrainte unique « users_pkey »`, `contrainte unique $1`},
+	{"for phrase still masks", "22P02", `invalid input for table: "x"`, `invalid input for table: $1`},
+	{"statement keeps every name", "23505", `statement: INSERT INTO "t" VALUES (1)`, `statement: INSERT INTO "t" VALUES (...)`},
+}
+
+// TestAppendTemplateNames checks AC-007: in classes 22 and 23 a
+// double-quoted token right after "constraint", "index" or "table" stays,
+// unless it holds a value (REQ-005, REQ-014).
+func TestAppendTemplateNames(t *testing.T) {
+	for _, c := range templateNameCases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &Record{SQLState: sqlState(t, c.state), Message: []byte(c.in)}
+			assert.Equal(t, c.want, string(AppendTemplate(nil, r)))
 		})
 	}
 }
@@ -772,6 +819,7 @@ var templateIdempotentCases = []templateStateCase{
 	{"placeholder before a digit word", "", "wrote $1 0abc", "wrote $1 0abc"},
 	{"placeholders are renumbered", "", "from $7 to $3", "from $1 to $2"},
 	{"placeholder in class 23", "23505", "violates unique constraint $1", "violates unique constraint $1"},
+	{"name in class 23", "23505", `violates unique constraint "users_email_key"`, `violates unique constraint "users_email_key"`},
 	{"placeholder after a for phrase", "22P02", "invalid input syntax for type integer: $1", "invalid input syntax for type integer: $1"},
 	{"placeholder in parentheses", "", "wrote $1 buffers ($2); lsn=$3", "wrote $1 buffers ($2); lsn=$3"},
 	{"signed placeholder", "", "offset -$1 and +$2", "offset -$1 and +$2"},
@@ -813,6 +861,9 @@ func templateInputs() []templateStateCase {
 	for _, c := range templateStatementCases {
 		out = append(out, templateStateCase{"statement/" + c.name, c.state, c.in, c.want})
 	}
+	for _, c := range templateNameCases {
+		out = append(out, templateStateCase{"name/" + c.name, c.state, c.in, c.want})
+	}
 	for _, c := range templateIdempotentCases {
 		out = append(out, templateStateCase{"idempotent/" + c.name, c.state, c.in, c.want})
 	}
@@ -851,8 +902,8 @@ func TestPatternID(t *testing.T) {
 			severity: SeverityError,
 			state:    "23505",
 			message:  `duplicate key value violates unique constraint "users_email_key"`,
-			input:    "ERROR\x0023505\x001\x00duplicate key value violates unique constraint $1",
-			want:     "ed9b5ca2afdcced5",
+			input:    "ERROR\x0023505\x001\x00duplicate key value violates unique constraint \"users_email_key\"",
+			want:     "57e66a9e79051ded",
 		},
 		{
 			name:     "zero SQLSTATE hashes as no bytes",
