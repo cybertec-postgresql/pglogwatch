@@ -1,8 +1,8 @@
 ---
 title: "pglogwatch masks a record's message into a template"
-version: 1.1
+version: 1.2
 date_created: 2026-10-23
-date_updated: 2026-10-24
+date_updated: 2026-10-25
 owner: pgwatch maintainers
 status: implemented
 tags: [pglogwatch, logs, normalisation, privacy]
@@ -32,6 +32,10 @@ Code references are against `pglogwatch` v1.0.0. Line numbers are indicative, no
 
 Version 1.1 states decisions the implementation made beyond the text of version 1.0. The
 requirement ids of 1.0 keep their meaning; REQ-014 to REQ-019 and GUD-002 are new.
+
+Version 1.2 keeps the name that follows `constraint`, `index` or `table` in SQLSTATE classes
+`22` and `23` (REQ-005). AC-007 is new. `TemplateRulesVersion` stays 1, since no template made
+under 1.1 has been released.
 
 ---
 
@@ -106,7 +110,11 @@ helper treats bytes above `0x7F` as word characters.
 - **REQ-005**: A double-quoted token is an identifier and stays, with these exceptions where
   PostgreSQL quotes *data* with `"`:
   - when `Record.SQLState` is in class `22` (data exception) or `23` (integrity constraint
-    violation), every double-quoted token becomes `$n`;
+    violation), every double-quoted token becomes `$n`, except one whose previous word is
+    `constraint`, `index` or `table`. The word matches without regard to ASCII case, and only
+    white space may stand between it and the token. Such a token stays unless REQ-014 masks
+    it: its body is a path, starts with a digit, `+`, `-`, `.`, `:`, `$` or `'`, or holds a
+    `'`;
   - in every class, the first double-quoted token after a phrase of the word `for`, then only
     words, white space and double-quoted tokens, then `:` becomes `$n`. This covers
     `invalid input syntax for type integer: "abc"`, the older `input syntax for integer:` and
@@ -117,6 +125,10 @@ helper treats bytes above `0x7F` as word characters.
   Guillemet quotes, `»…«` as German writes them and `«…»` or `« … »` as French and Russian
   write them, are double quotes under every rule. Spaces and no-break spaces after the opening
   mark are skipped before the body is checked.
+
+  The previous-word test of the first exception reads English words. In other languages the
+  names after those words stay masked (GUD-001), unless the translation uses one of the
+  words, as German `Unique-Constraint »users_pkey«` does.
 - **REQ-006**: A process id, transaction id, virtual transaction id, OID or session id written
   in the message (`process 1234`, `transaction 7890`, `relation 16384`, `PID 1234`) becomes
   `$n`. Numeric ids and the virtual transaction id `3/1234` are already literals. A word that
@@ -242,8 +254,10 @@ Examples, English `lc_messages`:
 | Severity, SQLSTATE | Message | Template |
 |---|---|---|
 | `ERROR 42P01` | `relation "orders_2026" does not exist` | `relation "orders_2026" does not exist` |
-| `ERROR 23505` | `duplicate key value violates unique constraint "users_email_key"` | `duplicate key value violates unique constraint $1` |
+| `ERROR 23505` | `duplicate key value violates unique constraint "users_email_key"` | `duplicate key value violates unique constraint "users_email_key"` |
+| `ERROR 23503` | `insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"` | `insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"` |
 | `ERROR 22P02` | `invalid input syntax for type integer: "abc"` | `invalid input syntax for type integer: $1` |
+| `ERROR 22P02` | `invalid input value for enum mood: "Ödön"` | `invalid input value for enum mood: $1` |
 | `FATAL 28P01` | `password authentication failed for user "bob"` | `password authentication failed for user "bob"` |
 | `LOG` | `connection authorized: user=bob database=shop application_name=psql` | `connection authorized: user=$1 database=$2 application_name=$3` |
 | `LOG` | `duration: 12.345 ms  statement: SELECT * FROM t WHERE id = 42 AND name = 'x'` | `duration: $1 statement: SELECT * FROM t WHERE id = $2 AND name = $3` |
@@ -253,8 +267,8 @@ Examples, English `lc_messages`:
 | `LOG` | `duration: 1500.2 ms  plan:\nQuery Text: …` | `duration: $1 plan: …` |
 | `ERROR 40P01` | `deadlock detected` | `deadlock detected` |
 
-The `23505` row masks the constraint name because the whole class `23` is masked (REQ-005); the
-precision lost is accepted (GUD-001).
+The `23505` and `23503` rows keep their names because each one follows `constraint` or
+`table` (REQ-005). The enum value of the second `22P02` row is data and becomes `$1`.
 
 ---
 
@@ -262,7 +276,8 @@ precision lost is accepted (GUD-001).
 
 - **AC-001**: Every row of the table in section 4 is a golden test.
 - **AC-002**: A privacy corpus of at least 200 messages, each seeded with a marker literal
-  (`'SECRET-1'`, `424242`, `user=SECRET-2`, `"SECRET-3"` in class `22`, an e-mail address in a
+  (`'SECRET-1'`, `424242`, `user=SECRET-2`, `"SECRET-3"` in class `22`, `"SECRET-3"` in class
+  `23` right after a word other than `constraint`, `index` or `table`, an e-mail address in a
   statement), yields templates in which no marker survives. The corpus writes the e-mail
   address as `{email}` and the test fills it in, because `TestFixturesCarryNoRealIdentifiers`
   forbids real e-mail addresses in `testdata`.
@@ -272,6 +287,9 @@ precision lost is accepted (GUD-001).
 - **AC-005**: `AppendTemplate` of a template equals the template (CON-002).
 - **AC-006**: A fuzz target never panics and never produces a template over 1,024 bytes plus
   the ellipsis (1,027 bytes).
+- **AC-007**: In class `23`, `constraint "c"`, `INDEX "i"` and `table  "t"` (two spaces) keep
+  their names. `constraint "123"` and `table "/tmp/x"` become `$n` (REQ-014), and so does
+  `column "secret"`.
 
 ---
 
@@ -291,6 +309,20 @@ existing corpus.
 The name of the missing relation or the violated index is the most useful part of most error
 messages, and it is what a DBA searches for. Identifiers are schema, not data. The two places
 where PostgreSQL puts data in double quotes are handled by REQ-005.
+
+### Why keep the constraint name in class 23?
+
+Under version 1.1 every `23505` of a database gave one pattern, whichever unique constraint it
+broke, and a DBA could not tell a duplicate e-mail from a duplicate order number. The name of
+the violated constraint, index or table is schema, chosen by whoever wrote the DDL, and it is
+the fact an operator acts on. PostgreSQL writes it right after one of three English words, so
+a test of the previous word finds it without a message catalog. The values that broke the
+constraint go to the `DETAIL` field, which the template does not read.
+
+A name can still hold data when the schema is generated from it, such as a constraint per
+customer. REQ-014 masks the names that look like values. Column and relation names stay
+masked, since the constraint name already tells the patterns apart and GUD-001 masks when in
+doubt.
 
 ### Why mask user and database names in `key=value` but keep the user in `password authentication failed for user "bob"`?
 
