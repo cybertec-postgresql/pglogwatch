@@ -8,12 +8,16 @@ template may keep:
 - the number `424242`;
 - `user=SECRET-2`;
 - `"SECRET-3"` in SQLSTATE classes 22 and 23, and after a `for type` phrase;
+  in class 23 also right after a word other than `constraint`, `index` or
+  `table`;
 - an e-mail address with the local part `secret4` in a statement, written
   `{email}` (see below).
 
 A marker sits only where a rule masks it. Places where a value stays by
 design are left out: a double-quoted identifier outside classes 22 and 23
-(REQ-005), and the role in `password authentication failed for user "x"`.
+(REQ-005), the name right after `constraint`, `index` or `table` in those
+classes, unless REQ-014 masks it, and the role in
+`password authentication failed for user "x"`.
 
 ## Format
 

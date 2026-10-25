@@ -67,6 +67,10 @@ func AppendTemplate(dst []byte, r *Record) []byte {
 	quotedData := isDataClass(r.SQLState)
 	prev := tokSpace // kind of the token before t
 	idNext := false  // the last word, before white space, is followed by an id
+	// named is true when the last word, before white space, is "constraint",
+	// "index" or "table". A double-quoted token right after it is a name and
+	// stays in classes 22 and 23 (REQ-005).
+	named := false
 	var after forState
 	// fuse is the start in dst of the run of copied words and '$' bytes that
 	// dst ends with, and -1 when it ends with anything else. A placeholder
@@ -131,7 +135,7 @@ scan:
 			flush()
 			mask()
 			z.pos = end
-			prev, idNext, after, markerOK = tokParam, false, forNone, true
+			prev, idNext, named, after, markerOK = tokParam, false, false, forNone, true
 			continue
 		}
 		t, ok := z.next()
@@ -198,7 +202,7 @@ scan:
 			dst, fuse = append(dst, '='), -1
 			mask()
 			z.skipValue()
-			prev, idNext, after, markerOK = tokParam, false, forNone, false
+			prev, idNext, named, after, markerOK = tokParam, false, false, forNone, false
 			continue
 		case masksLiteral(t.kind), !z.stmt && t.kind == tokWord && idNext && hasDigit(tb):
 			// REQ-006: a word with a digit after an id word, such as the
@@ -206,11 +210,13 @@ scan:
 			// and the LSN-shaped virtual transaction id "3/1234" are already
 			// literals. In a statement a word is a keyword or an identifier.
 			mask()
-		case !z.stmt && t.kind == tokIdent && (quotedData || after == forData || isQuotedValue(tb)):
+		case !z.stmt && t.kind == tokIdent && (quotedData && !named || after == forData || isQuotedValue(tb)):
 			// REQ-005 and REQ-007: a double-quoted token is an identifier
-			// and stays, unless it holds data, a path or a literal. In a
-			// statement it is always an identifier, whatever the SQLSTATE
-			// class, so it stays (REQ-009).
+			// and stays, unless it holds data, a path or a literal. In
+			// classes 22 and 23 it is data, unless it names the constraint,
+			// index or table of the word before it. In a statement it is
+			// always an identifier, whatever the SQLSTATE class, so it
+			// stays (REQ-019).
 			mask()
 		case glued && t.kind == tokWord && isDigit(tb[0]):
 			// The placeholder before this word takes it; see glued.
@@ -230,9 +236,9 @@ scan:
 			glued = false
 		}
 		if t.kind == tokWord {
-			idNext = isIDWord(tb)
+			idNext, named = isIDWord(tb), isNameWord(tb)
 		} else {
-			idNext = false
+			idNext, named = false, false
 		}
 		after = after.next(t.kind, tb)
 		markerOK = glued
@@ -522,8 +528,8 @@ func colonEnds(s []byte, j int) bool {
 
 // isDataClass reports whether a SQLSTATE is in class 22 (data exception) or
 // 23 (integrity constraint violation). In those classes PostgreSQL puts data
-// in double quotes, so every double-quoted token is masked (REQ-005). The
-// constraint name of a 23505 goes with it, which GUD-001 accepts.
+// in double quotes, so every double-quoted token is masked (REQ-005),
+// except a name right after a word that isNameWord accepts.
 func isDataClass(code [5]byte) bool {
 	return code[0] == '2' && (code[1] == '2' || code[1] == '3')
 }
@@ -727,6 +733,22 @@ var idWords = [...]string{
 
 func isIDWord(w []byte) bool {
 	for _, s := range idWords {
+		if equalFoldASCII(w, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// nameWords are the words after which a double-quoted token in SQLSTATE
+// class 22 or 23 is the name of an object, not data (REQ-005). They match
+// without regard to ASCII case. The test is English only; in other
+// languages these names stay masked unless the translation uses one of the
+// words, as German "Unique-Constraint" does.
+var nameWords = [...]string{"constraint", "index", "table"}
+
+func isNameWord(w []byte) bool {
+	for _, s := range nameWords {
 		if equalFoldASCII(w, s) {
 			return true
 		}
