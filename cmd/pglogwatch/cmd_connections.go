@@ -1,6 +1,6 @@
 package main
 
-import "github.com/cybertec-postgresql/pglogwatch"
+import "github.com/pashagolub/pglogwatch"
 
 func init() {
 	commands["connections"] = command{

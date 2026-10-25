@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 // Throughput against the real corpus (PERF-020 through PERF-023, AC-015).

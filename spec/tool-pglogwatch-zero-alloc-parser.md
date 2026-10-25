@@ -31,7 +31,7 @@ plus a reference CLI and a benchmark harness that proves the performance claims.
 
 **In scope**:
 
-- A new Go module `github.com/cybertec-postgresql/pglogwatch` (root package `pglogwatch`).
+- A new Go module `github.com/pashagolub/pglogwatch` (root package `pglogwatch`).
 - Streaming record-at-a-time parsing of `stderr`, `csvlog`, and `jsonlog` destinations.
 - `log_line_prefix` auto-detection and explicit specification for the `stderr` format.
 - Multi-line record assembly (`DETAIL:`, `HINT:`, `STATEMENT:`, `QUERY:`, `CONTEXT:` continuations;
@@ -95,7 +95,7 @@ integration; reviewers validating the performance claims.
 
 ### 3.1 Module & Packaging
 
-- **PKG-001**: The module path MUST be `github.com/cybertec-postgresql/pglogwatch`, published from a
+- **PKG-001**: The module path MUST be `github.com/pashagolub/pglogwatch`, published from a
   dedicated repository, licensed BSD-3-Clause to match pgwatch.
 - **PKG-002**: The root package `pglogwatch` MUST have **zero non-standard-library dependencies**.
   The `require` block in `go.mod` MUST be empty for the root module's non-test build.
@@ -655,7 +655,7 @@ Global flags: `--format`, `--line-prefix`, `--lang`, `--begin`, `--end`, `--jobs
 
 ### Packaging and integration
 
-- **AC-021**: Given `go list -deps github.com/cybertec-postgresql/pglogwatch`, When executed, Then no
+- **AC-021**: Given `go list -deps github.com/pashagolub/pglogwatch`, When executed, Then no
   non-standard-library package appears.
 - **AC-022**: Given `CGO_ENABLED=0 GOOS=windows go build ./...`, When executed, Then the build
   succeeds. The same holds for the other three target platforms.

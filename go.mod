@@ -1,4 +1,4 @@
-module github.com/cybertec-postgresql/pglogwatch
+module github.com/pashagolub/pglogwatch
 
 go 1.26.0
 

@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/bench/compare"
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/bench/compare"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 // AC-010 and COR-003: for the reference corpus, the per-severity counts

@@ -98,7 +98,7 @@ such. Option 1 is the recommendation.
 
 ## Parallel scaling (PERF-029, AC-019)
 
-Tracked as [issue #3](https://github.com/cybertec-postgresql/pglogwatch/issues/3).
+Tracked as [issue #3](https://github.com/pashagolub/pglogwatch/issues/3).
 
 **MET when measured properly. The shortfall recorded here was the measurement,
 not the code.**

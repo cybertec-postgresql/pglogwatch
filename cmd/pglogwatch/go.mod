@@ -1,10 +1,10 @@
-module github.com/cybertec-postgresql/pglogwatch/cmd/pglogwatch
+module github.com/pashagolub/pglogwatch/cmd/pglogwatch
 
 go 1.26.0
 
 require (
-	github.com/cybertec-postgresql/pglogwatch v0.0.0
-	github.com/cybertec-postgresql/pglogwatch/compress v0.0.0
+	github.com/pashagolub/pglogwatch v0.0.0
+	github.com/pashagolub/pglogwatch/compress v0.0.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -14,6 +14,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
 
-replace github.com/cybertec-postgresql/pglogwatch => ../..
+replace github.com/pashagolub/pglogwatch => ../..
 
-replace github.com/cybertec-postgresql/pglogwatch/compress => ../../compress
+replace github.com/pashagolub/pglogwatch/compress => ../../compress

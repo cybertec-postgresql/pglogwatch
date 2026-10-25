@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/ulikunitz/xz"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/compress"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/compress"
 )
 
 // A representative log: several records, long enough that compression

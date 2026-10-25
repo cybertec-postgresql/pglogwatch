@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cybertec-postgresql/pglogwatch"
+	"github.com/pashagolub/pglogwatch"
 )
 
 const sampleLog = `{"timestamp":"2026-08-30 10:11:12.123 UTC","error_severity":"LOG","message":"duration: 1.500 ms  statement: SELECT 1"}

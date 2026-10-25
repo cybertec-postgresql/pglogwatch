@@ -24,14 +24,14 @@ grown to fit the largest record seen so far.
 ## Install
 
 ```bash
-go get github.com/cybertec-postgresql/pglogwatch
+go get github.com/pashagolub/pglogwatch
 ```
 
 The reference CLI is a separate module, so installing it pulls nothing into
 your own build:
 
 ```bash
-go install github.com/cybertec-postgresql/pglogwatch/cmd/pglogwatch@latest
+go install github.com/pashagolub/pglogwatch/cmd/pglogwatch@latest
 ```
 
 ## Why

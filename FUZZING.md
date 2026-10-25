@@ -66,7 +66,7 @@ wall-clock budget measures the machine, not the requirement.
 ## The corpus is not committed
 
 The run above left 1 132 coverage-guided inputs in Go's build cache under
-`$(go env GOCACHE)/fuzz/github.com/cybertec-postgresql/pglogwatch/`. They are
+`$(go env GOCACHE)/fuzz/github.com/pashagolub/pglogwatch/`. They are
 deliberately **not** in this repository.
 
 Committing them would put them under `testdata/fuzz/<Target>/`, where Go

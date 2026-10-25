@@ -13,7 +13,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 **Repository roots**:
 
-- `pglogwatch/` — the new module `github.com/cybertec-postgresql/pglogwatch`
+- `pglogwatch/` — the new module `github.com/pashagolub/pglogwatch`
 - `pgwatch/` — the existing pgwatch repository (US10 only)
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -45,8 +45,8 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 **Purpose**: Repository, module layout, toolchain and CI skeleton
 
-- [x] T001 Create the public repository `cybertec-postgresql/pglogwatch` with pgwatch's branch protection and release conventions (INF-001); add `LICENSE` (BSD-3-Clause, COM-001) and a `README.md` whose first line reads "zero-allocation PostgreSQL log parser" (PKG-008)
-- [x] T002 Create root `go.mod` declaring `module github.com/cybertec-postgresql/pglogwatch` and `go 1.26` with an empty non-test `require` block (PKG-001, PKG-002, PKG-005, PLT-001)
+- [x] T001 Create the public repository `pashagolub/pglogwatch` with pgwatch's branch protection and release conventions (INF-001); add `LICENSE` (BSD-3-Clause, COM-001) and a `README.md` whose first line reads "zero-allocation PostgreSQL log parser" (PKG-008)
+- [x] T002 Create root `go.mod` declaring `module github.com/pashagolub/pglogwatch` and `go 1.26` with an empty non-test `require` block (PKG-001, PKG-002, PKG-005, PLT-001)
 - [x] T003 [P] Add `github.com/stretchr/testify` as a test-only dependency in the root `go.mod` (PKG-003)
 - [x] T004 [P] Create nested module skeletons with their own `go.mod`: `compress/`, `pgremote/`, `cmd/pglogwatch/`, `bench/` (PKG-004)
 - [x] T005 [P] Configure linting and formatting in `.golangci.yml` (`go vet`, `staticcheck`, `gofumpt`) and add `Makefile` targets `test`, `test-race`, `cover`, `fuzz`, `bench`, `bench-compare`, `corpus`, `lint`
@@ -277,7 +277,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 **Goal**: Optional compressed input and remote reads over a PostgreSQL connection, without adding a single dependency to the root module.
 
-**Independent Test**: `go list -deps github.com/cybertec-postgresql/pglogwatch` still shows only standard-library packages while both nested modules build and pass their tests.
+**Independent Test**: `go list -deps github.com/pashagolub/pglogwatch` still shows only standard-library packages while both nested modules build and pass their tests.
 
 ### Tests for User Story 7 ⚠️
 
@@ -408,7 +408,7 @@ description: "Task list for pglogwatch — standalone zero-allocation PostgreSQL
 
 ### Implementation for User Story 10
 
-- [x] T156 [US10] Add `github.com/cybertec-postgresql/pglogwatch` and `pglogwatch/pgremote` to `pgwatch/go.mod`
+- [x] T156 [US10] Add `github.com/pashagolub/pglogwatch` and `pglogwatch/pgremote` to `pgwatch/go.mod`
 - [x] T157 [US10] Write the adapter `pgwatch/internal/reaper/logparser.go`: retain `tryDetermineLogSettings` GUC resolution, construct a `pglogwatch.FileSet` (local) or a `pgremote` reader (remote), count severities per database and per instance, and emit the existing envelope shape (IFC-013, PAT-005) — depends on T098, T114
 - [x] T158 [US10] Remove the `log_destination must contain 'csvlog'` hard error and accept `stderr` and `jsonlog` (IFC-014) — depends on T157
 - [x] T159 [US10] Retain the `logging_collector is not enabled` error (IFC-015) — depends on T157

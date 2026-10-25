@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/cybertec-postgresql/pglogwatch/internal/allocs"
+	"github.com/pashagolub/pglogwatch/internal/allocs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

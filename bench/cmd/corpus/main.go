@@ -15,7 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 func main() {

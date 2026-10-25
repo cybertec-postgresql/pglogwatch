@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/pgremote"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/pgremote"
 )
 
 // Remote reading against a mocked connection (§6.1's integration level).
