@@ -44,7 +44,7 @@ func TestImportsAreStandardLibraryOnly(t *testing.T) {
 	}
 }
 
-const modulePath = "github.com/cybertec-postgresql/pglogwatch"
+const modulePath = "github.com/pashagolub/pglogwatch"
 
 // TestForbiddenImports covers CON-004, which singles out four standard-library
 // packages the root package must not reach.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/cybertec-postgresql/pglogwatch"
+	"github.com/pashagolub/pglogwatch"
 )
 
 // --jobs support.

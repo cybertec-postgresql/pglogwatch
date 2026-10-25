@@ -82,7 +82,7 @@ func BenchmarkParallelScan16(b *testing.B) { benchmarkParallelScan(b, 16) }
 // has two entirely different causes -- cores that sat idle, and cores that ran
 // slower than they do alone -- and the fix is different for each.
 //
-// Tracked as https://github.com/cybertec-postgresql/pglogwatch/issues/3.
+// Tracked as https://github.com/pashagolub/pglogwatch/issues/3.
 
 const (
 	// scalingWarmupReps are discarded. The first run of a session is faster

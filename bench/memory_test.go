@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 // PERF-026: peak memory must be O(1) in input size, and under 64 MiB for a

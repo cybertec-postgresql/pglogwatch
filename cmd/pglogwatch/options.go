@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/compress"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/compress"
 )
 
 // errNoInput reports that no path matched, which IFC-012 maps to exit code 2.

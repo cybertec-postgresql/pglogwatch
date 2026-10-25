@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cybertec-postgresql/pglogwatch"
+	"github.com/pashagolub/pglogwatch"
 )
 
 // Output helpers shared by every subcommand.

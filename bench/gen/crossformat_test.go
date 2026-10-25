@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cybertec-postgresql/pglogwatch"
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 // TestEveryFormatDescribesTheSameActivity is TST-002 and COR-004 applied to

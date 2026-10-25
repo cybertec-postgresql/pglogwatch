@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/cybertec-postgresql/pglogwatch"
+	"github.com/pashagolub/pglogwatch"
 )
 
 func init() {

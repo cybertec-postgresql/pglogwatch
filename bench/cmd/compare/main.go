@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cybertec-postgresql/pglogwatch/bench/compare"
-	"github.com/cybertec-postgresql/pglogwatch/bench/gen"
+	"github.com/pashagolub/pglogwatch/bench/compare"
+	"github.com/pashagolub/pglogwatch/bench/gen"
 )
 
 func main() {
