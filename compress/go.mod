@@ -8,9 +8,7 @@ require (
 )
 
 require (
-	github.com/pashagolub/pglogwatch v0.0.0
+	github.com/pashagolub/pglogwatch v1.1.0
 	github.com/stretchr/testify v1.12.1
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
-
-replace github.com/pashagolub/pglogwatch => ..

@@ -3,7 +3,7 @@ module github.com/pashagolub/pglogwatch/cmd/pglogwatch
 go 1.26.0
 
 require (
-	github.com/pashagolub/pglogwatch v0.0.0
+	github.com/pashagolub/pglogwatch v1.1.0
 	github.com/pashagolub/pglogwatch/compress v0.0.0
 	github.com/stretchr/testify v1.12.1
 )
