@@ -1,5 +1,9 @@
 github.com/klauspost/compress v1.19.2 h1:hMRETovs/pu/dVWN7zIT1PGG8t509MwT6bO7XSi26R8=
 github.com/klauspost/compress v1.19.2/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+github.com/pashagolub/pglogwatch v1.1.0 h1:638/XUHynXug3EUjHs5UukBmelklkFkKsYFNbcLv4Eo=
+github.com/pashagolub/pglogwatch v1.1.0/go.mod h1:auYsGfuAR3PrA8+lWPsgo6u0SwXCcwPrHuWaH/hizXA=
+github.com/pashagolub/pglogwatch/compress v1.1.0 h1:3+XeAWy4cWbRLlS7Wliy0T9vnDHKj6EgIgB7idwbpPg=
+github.com/pashagolub/pglogwatch/compress v1.1.0/go.mod h1:Ox4MfgCAcAjBIQJeAM41+4OxJ6HshUSw5SekE1ZaYu8=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/ulikunitz/xz v0.5.16 h1:ld6NyySjx5lowVKwJvMRLnW5nxKX/xnpSiFYZ/Lxur0=
