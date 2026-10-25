@@ -202,14 +202,17 @@ A few messages and their templates:
 | severity, SQLSTATE | message | template |
 |---|---|---|
 | `ERROR 42P01` | `relation "orders_2026" does not exist` | `relation "orders_2026" does not exist` |
+| `ERROR 23505` | `duplicate key value violates unique constraint "users_email_key"` | `duplicate key value violates unique constraint "users_email_key"` |
 | `ERROR 22P02` | `invalid input syntax for type integer: "abc"` | `invalid input syntax for type integer: $1` |
 | `LOG` | `connection authorized: user=bob database=shop` | `connection authorized: user=$1 database=$2` |
 | `LOG` | `duration: 3.1 ms  execute S_7: select a from b where c in (1, 2, 3)` | `duration: $1 execute $2: select a from b where c in (...)` |
 
 When a rule is in doubt, the helper masks (GUD-001). A template that is too
 coarse costs some precision, and a template that keeps a value leaks it. So a
-double-quoted identifier stays, except in SQLSTATE classes 22 and 23 and
-where its text looks like a value, such as a path or a number. The template
+double-quoted identifier stays, except where its text looks like a value,
+such as a path or a number, and in SQLSTATE classes 22 and 23. There only the
+name right after `constraint`, `index` or `table` stays, so
+`violates unique constraint "users_email_key"` keeps its name. The template
 reads the message as given, so unquote a csvlog or jsonlog message first, as
 above, or one event gives a different template per format. `AppendTemplate`
 does not allocate when `dst` has room, and `PatternID` does not allocate.

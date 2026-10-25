@@ -14,8 +14,13 @@ changes none.
   template into an 8-byte id that can be a map key. Neither allocates when
   `dst` has 1,100 bytes of spare capacity. `spec/message-template.md` is the
   specification.
+- **Constraint, index and table names stay.** In SQLSTATE classes 22 and 23,
+  a double-quoted name right after `constraint`, `index` or `table` stays in
+  the template, so each unique constraint gets its own `23505` pattern. Other
+  double-quoted tokens in those classes are still masked, and so is a name
+  that looks like a value, such as a path or a number.
 - **Masking errs toward privacy.** When a rule is in doubt, the helper masks
-  (GUD-001). A privacy corpus of 333 messages seeded with marker values runs
+  (GUD-001). A privacy corpus of 335 messages seeded with marker values runs
   on every build, and no marker may survive. A fuzz target,
   `FuzzAppendTemplate`, joins the nightly fuzz job.
 - **`TemplateRulesVersion`** is part of the hash. A later rule change raises
